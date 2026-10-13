@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Turn DiscordChatExporter JSON exports into persona fine-tuning data.
 
-    python discord_to_sft.py exports/ --persona bob --persona alice -o data/
+    understudy dataset exports/ --persona bob --persona alice -o data/
 
 Reads DCE JSON, merges message bursts, splits on conversation gaps, windows
 context, and writes train.jsonl / val.jsonl in the chat-messages format.
@@ -20,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from profiles import read_profiles, system_prompt
+from understudy.profiles import read_profiles, system_prompt
 
 # ---------------------------------------------------------------- tunables
 
@@ -285,26 +284,32 @@ def build_examples(turns: list[Turn], personas: set[str], channel: str,
 
 # -------------------------------------------------------------------- main
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
+def optional(name: str) -> Path | None:
+    """A file in the working directory, if it's there."""
+    return Path(name) if Path(name).exists() else None
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="understudy dataset", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", type=Path, help="DCE .json file or a directory of them")
+    ap.add_argument("input", type=Path, nargs="?", default=Path("exports"),
+                    help="DCE .json file or a directory of them (default exports/)")
     ap.add_argument("--persona", action="append", default=[],
                     help="name to imitate; repeat for each (matches name or nickname)")
     ap.add_argument("-o", "--out", type=Path, default=Path("data"))
     ap.add_argument("--alias", action="append", default=[], metavar="REAL=FAKE",
                     help="pseudonymize a name everywhere it appears")
-    ap.add_argument("--aliases", type=Path, metavar="FILE",
+    ap.add_argument("--aliases", type=Path, metavar="FILE", default=optional("aliases.txt"),
                     help="REAL=FAKE per line, # comments, a leading * marks a persona "
                          "(*NAME alone for one without an alias), \"REAL\" matches whole words")
-    ap.add_argument("--profiles", type=Path, metavar="FILE",
+    ap.add_argument("--profiles", type=Path, metavar="FILE", default=optional("profiles.txt"),
                     help="persona profiles to put in each system prompt (see profiles.py)")
     ap.add_argument("--no-scrub", action="store_true",
                     help="keep emails / phone numbers / invites / addresses / links / passwords verbatim")
     ap.add_argument("--keep-bots", action="store_true")
     ap.add_argument("--keep-attachment-targets", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     paths = sorted(args.input.rglob("*.json")) if args.input.is_dir() else [args.input]
     if not paths:

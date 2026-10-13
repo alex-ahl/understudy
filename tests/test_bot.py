@@ -1,13 +1,11 @@
-import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from bot import (build_messages, clean_reply, conversation, load_personas, named_personas,
-                 read_tokens)
-from discord_to_sft import Msg
+from understudy.bot import (build_messages, clean_reply, conversation, load_personas, named_personas,
+                            read_tokens)
+from understudy.dataset import Msg
 
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 

@@ -1,8 +1,0 @@
-# CUDA box under WSL2. Install torch first from the cu124 index:
-#   uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-unsloth
-trl
-peft
-transformers
-datasets
-bitsandbytes

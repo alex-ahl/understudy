@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
 """Discord bots that let the personas talk in the server, through llama-server.
 
-    python scripts/bot.py
+    understudy bot
 
-Each persona is its own bot account; bots.txt (gitignored) holds one
-`persona=token` line per persona. A persona replies to the channel's recent
+Each persona is its own bot account; bots.txt holds one `persona=token` line
+per persona. aliases.txt, bots.txt and profiles.txt are read from the working
+directory unless given as flags. A persona replies to the channel's recent
 conversation when someone @-mentions it or writes its name in a message.
 
 Environment:
@@ -12,6 +12,9 @@ Environment:
     CHANNELS        comma-separated channel names to reply in (default: all)
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
 import json
 import logging
@@ -20,9 +23,9 @@ import re
 import urllib.request
 from pathlib import Path
 
-from discord_to_sft import (CONTEXT_TURNS, GAP_MINUTES, Msg, build_aliases, clean, display_name,
-                            fold, merge_bursts, read_aliases_file, render, unquote)
-from profiles import read_profiles, system_prompt
+from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, Msg, build_aliases, clean, display_name,
+                                 fold, merge_bursts, read_aliases_file, render, unquote)
+from understudy.profiles import read_profiles, system_prompt
 
 log = logging.getLogger("understudy")
 
@@ -125,16 +128,22 @@ def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
     return RE_PLACEHOLDER.sub("", clean("\n".join(kept), [], {}, scrub=True)).strip()
 
 
-def run() -> None:
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="understudy bot", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--aliases", type=Path, default=Path("aliases.txt"), metavar="FILE")
+    ap.add_argument("--tokens", type=Path, default=Path("bots.txt"), metavar="FILE")
+    ap.add_argument("--profiles", type=Path, default=Path("profiles.txt"), metavar="FILE")
+    args = ap.parse_args(argv)
+
     import discord
 
-    root = Path(__file__).resolve().parent.parent
-    aliases, all_personas = load_personas(root / "aliases.txt")
-    tokens = read_tokens(root / "bots.txt")
+    aliases, all_personas = load_personas(args.aliases)
+    tokens = read_tokens(args.tokens)
     personas = [p for p in all_personas if fold(p) in tokens]
     if not personas:
-        raise SystemExit("bots.txt has no token for any persona in aliases.txt")
-    profiles_path = root / "profiles.txt"
+        raise SystemExit(f"{args.tokens} has no token for any persona in {args.aliases}")
+    profiles_path = args.profiles
     llm_url = os.environ.get("LLM_URL", "http://localhost:8080")
     channels = {c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()}
 
@@ -208,13 +217,14 @@ def run() -> None:
         except Exception as e:
             print(f"{persona} could not connect: {type(e).__name__}: {e}")
 
-    async def main():
+    async def start_all():
         # client.run() sets this up itself; start() doesn't, and connection trouble goes silent
         discord.utils.setup_logging()
         await asyncio.gather(*(start(p, c, i) for i, (p, c) in enumerate(clients.items())))
 
-    asyncio.run(main())
+    asyncio.run(start_all())
+    return 0
 
 
 if __name__ == "__main__":
-    run()
+    raise SystemExit(main())

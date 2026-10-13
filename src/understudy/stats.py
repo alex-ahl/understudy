@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Token lengths of the dataset under the model's chat template.
 
-    python scripts/token_stats.py data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
+    understudy stats data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
 
 Pick max_seq_length just above p95; longer examples get truncated in training.
 """
@@ -19,12 +18,12 @@ def percentile(sorted_vals: list[int], q: float) -> int:
     return sorted_vals[min(len(sorted_vals) - 1, int(len(sorted_vals) * q))]
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="understudy stats", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", type=Path)
     ap.add_argument("--model", required=True)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     tok = AutoTokenizer.from_pretrained(args.model)
     rows = [json.loads(line) for line in args.data.open(encoding="utf-8")]

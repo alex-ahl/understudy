@@ -6,7 +6,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "discord_to_sft.py"
+# run from a temp dir: dataset picks up aliases.txt / profiles.txt from the working directory
+DATASET = [sys.executable, "-m", "understudy", "dataset"]
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
 
@@ -29,8 +30,8 @@ def run(messages, *flags):
         (tmp / "export.json").write_text(json.dumps(
             {"channel": {"name": "general"}, "messages": messages}))
         proc = subprocess.run(
-            [sys.executable, SCRIPT, tmp / "export.json", "-o", tmp / "out", *flags],
-            capture_output=True, text=True)
+            [*DATASET, tmp / "export.json", "-o", tmp / "out", *flags],
+            capture_output=True, text=True, cwd=tmp)
         rows = []
         for name in ("train", "val"):
             path = tmp / "out" / f"{name}.jsonl"
@@ -228,8 +229,8 @@ class DiscordToSft(unittest.TestCase):
                     ],
                 }))
             proc = subprocess.run(
-                [sys.executable, SCRIPT, tmp, "--persona", "bob", "-o", tmp / "out"],
-                capture_output=True, text=True)
+                [*DATASET, tmp, "--persona", "bob", "-o", tmp / "out"],
+                capture_output=True, text=True, cwd=tmp)
         self.assertRegex(proc.stdout, r"\n\s+2  bob\n")
 
 

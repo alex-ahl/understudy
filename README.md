@@ -29,7 +29,9 @@ llama.cpp does.
 ## 2. Build the dataset
 
 ```sh
-make dataset
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.10+
+pip install -e .
+understudy dataset              # exports/ -> data/train.jsonl, data/val.jsonl
 ```
 
 `aliases.txt` lists who to imitate and which names to replace. One entry per
@@ -48,7 +50,7 @@ carl_xx=carl          # not a persona, aliased in context
   also catch unrelated words. Case, accents, and stray marks like `´` are ignored.
 - `"REAL"=FAKE` (quoted) matches the whole word only, plus a possessive `s`.
 
-`PERSONAS="..."` and `ALIASES="REAL=FAKE ..."` add more on the command line.
+`--persona NAME` and `--alias REAL=FAKE`, each repeatable, add more on the command line.
 Emails, phone numbers, invites, links, passwords and Swedish street addresses are
 scrubbed.
 
@@ -59,7 +61,7 @@ A persona needs ~500 examples. Below that, add channels or drop the persona.
 `profiles.txt` (gitignored) gives each persona two or three lines in their own
 voice; start from `profiles.example.txt`. The bots put them into the conversation
 as that persona's earlier messages, the last one closest to the reply.
-`make dataset` also puts them in the training system prompt.
+`understudy dataset` also puts them in the training system prompt.
 
 ## 3. Set up the training box
 
@@ -68,7 +70,7 @@ nvidia-smi                      # must work; under WSL2, do not install a driver
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv --python 3.11 && source .venv/bin/activate
 uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-uv pip install -r requirements-train.txt
+uv pip install -e '.[train]'
 ```
 
 Under WSL2, keep the repo and data under `~/`, not `/mnt/c/`.
@@ -76,12 +78,12 @@ Under WSL2, keep the repo and data under `~/`, not `/mnt/c/`.
 ## 4. Train
 
 ```sh
-make stats                      # set MAX_SEQ just above p95
-make train MAX_SEQ=1024
+understudy stats data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
+understudy train --max-seq-length 1024   # just above p95
 ```
 
-The adapter lands in `outputs/adapter/`. `MODEL=` picks another base model; the
-response masking in `scripts/train.py` assumes the Llama 3 chat format.
+The adapter lands in `outputs/adapter/`. `--model` picks another base model; the
+response masking in `understudy train` assumes the Llama 3 chat format.
 
 ## 5. Serve
 
@@ -93,15 +95,19 @@ git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r ../llama.cpp/requirements/requirements-convert_lora_to_gguf.txt
 
-make lora-gguf                  # outputs/adapter.gguf
-make serve                      # downloads the base model on first run, then serves on :8080
+python3 ../llama.cpp/convert_lora_to_gguf.py outputs/adapter \
+  --base-model-id AI-Sweden-Models/Llama-3-8B-instruct --outfile outputs/adapter.gguf
+# downloads the base model on first run, then serves on :8080
+llama-server -hf AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf \
+  --lora-scaled outputs/adapter.gguf:1.0 -c 4096 --port 8080
 ```
 
-`LORA_SCALE` (default 1.0) above 1 exaggerates the personas.
+`-m path/to/model.gguf` instead of `-hf` serves a local base model. A LoRA scale
+above 1.0 exaggerates the personas.
 
 ## 6. Discord bots
 
-Each persona is its own bot account, running next to `make serve`.
+Each persona is its own bot account, running next to `llama-server`.
 
 1. For each persona, in the Developer Portal: **New Application** named after
    the persona → **Bot**: set the avatar, enable **Message Content Intent**,
@@ -114,12 +120,12 @@ Each persona is its own bot account, running next to `make serve`.
 
    ```sh
    source .venv/bin/activate
-   pip install -r requirements-bot.txt
-   make bot
+   pip install -e '.[bot]'
+   understudy bot
    ```
 
 A persona replies to the channel's recent conversation when someone @-mentions
 it or writes its name. `CHANNELS` (comma-separated names) limits where;
 `LLM_URL` points at another server.
 
-Run `make test` after changing the scripts.
+Run `python -m unittest discover -s tests` after changing the code.

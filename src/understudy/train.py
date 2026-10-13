@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """QLoRA fine-tune of one shared adapter across all personas.
 
-    python scripts/train.py --data data/ --out outputs/adapter
+    understudy train --data data/ --out outputs/adapter
 
 Needs CUDA (run under WSL2 on the training box). Writes the LoRA adapter only.
 """
@@ -23,8 +22,8 @@ INSTRUCTION_PART = "<|start_header_id|>user<|end_header_id|>\n\n"
 RESPONSE_PART = "<|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="understudy train", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("data"))
     ap.add_argument("--out", type=Path, default=Path("outputs/adapter"))
@@ -36,7 +35,7 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--grad-accum", type=int, default=16)
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     model, tok = FastLanguageModel.from_pretrained(
         model_name=args.model,

@@ -7,7 +7,7 @@ name = "understudy"
 version = "0.1.0"
 description = "Discord persona bots: fine-tune one LoRA adapter on a server's history and post as each persona"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]

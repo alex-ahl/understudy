@@ -1,0 +1,39 @@
+# Copy to understudy.toml (gitignored). Every key is optional and mirrors a
+# command's long option with _ for -; `understudy <command> -h` lists them.
+# Top-level keys apply to every command with that option, a [section] to one
+# command. Relative paths resolve against this file's directory.
+
+model = "AI-Sweden-Models/Llama-3-8B-instruct"
+max_seq_length = 1024       # stats warns when p95 is above it
+seed = 0
+
+[dataset]
+input = "exports"
+out = "data"
+aliases = "aliases.txt"
+profiles = "profiles.txt"
+persona = ["bob", "alice"]  # adds to the * lines in aliases.txt
+
+[train]
+data = "data"
+out = "outputs/adapter"
+epochs = 3
+rank = 16
+
+[convert]
+adapter = "outputs/adapter"
+out = "outputs/adapter.gguf"
+llama_cpp = "../llama.cpp"
+
+[serve]
+adapter = "outputs/adapter.gguf"
+base_hf = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"
+# base_gguf = "models/base.gguf"
+lora_scale = 1.0
+context = 4096
+port = 8080
+
+[bot]
+tokens = "bots.txt"
+llm_url = "http://localhost:8080"
+channel = ["general"]

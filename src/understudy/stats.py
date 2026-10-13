@@ -9,21 +9,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from transformers import AutoTokenizer
+from understudy.train import MODEL
 
 
 def percentile(sorted_vals: list[int], q: float) -> int:
     return sorted_vals[min(len(sorted_vals) - 1, int(len(sorted_vals) * q))]
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy stats", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("data", type=Path)
-    ap.add_argument("--model", required=True)
-    args = ap.parse_args(argv)
+    ap.add_argument("data", type=Path, nargs="?", default=Path("data/train.jsonl"))
+    ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--max-seq-length", type=int, default=1024,
+                    help="warn when p95 is above it (default 1024, as in train)")
+    return ap
+
+
+def run(args: argparse.Namespace) -> int:
+    from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(args.model)
     rows = [json.loads(line) for line in args.data.open(encoding="utf-8")]
@@ -41,7 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     for limit in (512, 768, 1024, 1536, 2048):
         over = sum(n > limit for n in lengths)
         print(f"  > {limit:<5} {over:>6}  ({over / len(lengths):.1%})")
+    p95 = percentile(lengths, 0.95)
+    if p95 > args.max_seq_length:
+        print(f"\np95 {p95} is over max_seq_length {args.max_seq_length}: training truncates "
+              f"over 5% of examples", file=sys.stderr)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(parser().parse_args(argv))
 
 
 if __name__ == "__main__":

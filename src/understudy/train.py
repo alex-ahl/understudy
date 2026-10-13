@@ -7,27 +7,22 @@ Needs CUDA (run under WSL2 on the training box). Writes the LoRA adapter only.
 
 from __future__ import annotations
 
-# unsloth patches transformers/trl on import, so it has to come first
-from unsloth import FastLanguageModel
-from unsloth.chat_templates import train_on_responses_only
-
 import argparse
 from pathlib import Path
 
-from datasets import load_dataset
-from trl import SFTConfig, SFTTrainer
+MODEL = "AI-Sweden-Models/Llama-3-8B-instruct"
 
 # Llama 3 header tokens; loss is masked to everything after the assistant header
 INSTRUCTION_PART = "<|start_header_id|>user<|end_header_id|>\n\n"
 RESPONSE_PART = "<|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy train", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("data"))
     ap.add_argument("--out", type=Path, default=Path("outputs/adapter"))
-    ap.add_argument("--model", default="AI-Sweden-Models/Llama-3-8B-instruct")
+    ap.add_argument("--model", default=MODEL)
     ap.add_argument("--max-seq-length", type=int, default=1024)
     # low rank on purpose: high rank mostly buys verbatim memorization
     ap.add_argument("--rank", type=int, default=16)
@@ -35,7 +30,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--grad-accum", type=int, default=16)
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args(argv)
+    return ap
+
+
+def run(args: argparse.Namespace) -> int:
+    # unsloth patches transformers/trl on import, so it has to come first
+    from unsloth import FastLanguageModel
+    from unsloth.chat_templates import train_on_responses_only
+
+    from datasets import load_dataset
+    from trl import SFTConfig, SFTTrainer
 
     model, tok = FastLanguageModel.from_pretrained(
         model_name=args.model,
@@ -97,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
     tok.save_pretrained(args.out)
     print(f"adapter -> {args.out}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(parser().parse_args(argv))
 
 
 if __name__ == "__main__":

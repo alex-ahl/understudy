@@ -13,6 +13,39 @@ llama.cpp does.
 - Read history with a bot token only.
 - Label bot output visibly, e.g. a distinct avatar and name per persona.
 
+## Settings
+
+Every command reads `understudy.toml` (gitignored) from the working directory,
+or the file given with `understudy --config FILE <command>`. Start from
+`understudy.example.toml`.
+
+- Keys are the commands' long options with `_` for `-`: `max_seq_length = 1536`
+  for `--max-seq-length 1536`. `understudy <command> -h` lists them.
+- A top-level key applies to every command with that option; a `[command]`
+  section applies to that command and wins over the top level.
+- Flags on the command line win over the file.
+- Relative paths resolve against the file's directory.
+- An unknown key or section stops the command.
+
+Keep private files in the repo root, where `.gitignore` covers them:
+`understudy.toml`, `aliases.txt`, `profiles.txt`, `bots.txt`, `exports/`,
+`data/`, `outputs/`. With them in place,
+`python -m unittest discover -s tests` fails if a tracked file contains a name,
+profile line or token from them.
+
+## Pipeline
+
+```sh
+understudy pipeline                         # dataset -> stats -> train -> convert
+understudy pipeline --to train              # stop after training
+understudy pipeline --from convert          # start from an existing adapter
+```
+
+Each stage runs with the settings file's values and stops the pipeline when it
+fails. Stages run wherever their requirements are installed; copy `data/` or
+`outputs/` between machines to split the pipeline across them. `serve` and `bot`
+run until stopped and are started separately.
+
 ## 1. Export
 
 1. Discord Developer Portal → New Application → Bot → enable **Message Content
@@ -29,7 +62,7 @@ llama.cpp does.
 ## 2. Build the dataset
 
 ```sh
-python3 -m venv .venv && source .venv/bin/activate   # Python 3.10+
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.11+
 pip install -e '.[dataset]'
 understudy dataset              # exports/ -> data/train.jsonl, data/val.jsonl
 ```
@@ -91,11 +124,12 @@ Under WSL2, keep the repo and data under `~/`, not `/mnt/c/`.
 ## 4. Train
 
 ```sh
-understudy stats data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
-understudy train --max-seq-length 1024   # just above p95
+understudy stats                          # token lengths of data/train.jsonl
+understudy train --max-seq-length 1024    # just above p95
 ```
 
-The adapter lands in `outputs/adapter/`. `--model` picks another base model; the
+`stats` warns when p95 is above `--max-seq-length`. The adapter lands in
+`outputs/adapter/`. `--model` picks another base model; the
 response masking in `understudy train` assumes the Llama 3 chat format.
 
 ## 5. Serve
@@ -106,17 +140,16 @@ With the adapter in `outputs/adapter/`:
 brew install llama.cpp          # or build it; llama-server must be on PATH
 git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
 python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 pip install -r ../llama.cpp/requirements/requirements-convert_lora_to_gguf.txt
 
-python3 ../llama.cpp/convert_lora_to_gguf.py outputs/adapter \
-  --base-model-id AI-Sweden-Models/Llama-3-8B-instruct --outfile outputs/adapter.gguf
-# downloads the base model on first run, then serves on :8080
-llama-server -hf AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf \
-  --lora-scaled outputs/adapter.gguf:1.0 -c 4096 --port 8080
+understudy convert --llama-cpp ../llama.cpp   # -> outputs/adapter.gguf
+understudy serve                              # downloads the base model on first run, serves on :8080
 ```
 
-`-m path/to/model.gguf` instead of `-hf` serves a local base model. A LoRA scale
-above 1.0 exaggerates the personas.
+`--base-gguf FILE` serves a local base model. `--lora-scale` above 1.0
+exaggerates the personas; `--context` and `--port` set llama-server's `-c` and
+`--port`.
 
 ## 6. Discord bots
 
@@ -138,7 +171,8 @@ Each persona is its own bot account, running next to `llama-server`.
    ```
 
 A persona replies to the channel's recent conversation when someone @-mentions
-it or writes its name. `CHANNELS` (comma-separated names) limits where;
-`LLM_URL` points at another server.
+it or writes its name. `--channel NAME`, repeatable, limits where;
+`--llm-url` points at another server. They default to the `CHANNELS`
+(comma-separated) and `LLM_URL` environment variables.
 
 Run `python -m unittest discover -s tests` after changing the code.

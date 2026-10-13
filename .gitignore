@@ -6,6 +6,7 @@ aliases.txt
 profiles.txt
 bots.txt
 names.txt
+understudy.toml
 
 .venv/
 __pycache__/

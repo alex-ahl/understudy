@@ -276,7 +276,7 @@ def optional(name: str) -> Path | None:
     return Path(name) if Path(name).exists() else None
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy dataset", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", type=Path, nargs="?", default=Path("exports"),
@@ -296,8 +296,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-bots", action="store_true")
     ap.add_argument("--keep-attachment-targets", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args(argv)
+    return ap
 
+
+def run(args: argparse.Namespace) -> int:
     paths = sorted(args.input.rglob("*.json")) if args.input.is_dir() else [args.input]
     if not paths:
         print(f"no .json exports under {args.input}", file=sys.stderr)
@@ -380,6 +382,10 @@ def main(argv: list[str] | None = None) -> int:
         for name, n in scrubber.organizations.most_common(20):
             print(f"  {n:>6}  {name}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(parser().parse_args(argv))
 
 
 if __name__ == "__main__":

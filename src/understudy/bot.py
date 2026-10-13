@@ -7,9 +7,8 @@ per persona. aliases.txt, bots.txt and profiles.txt are read from the working
 directory unless given as flags. A persona replies to the channel's recent
 conversation when someone @-mentions it or writes its name in a message.
 
-Environment:
-    LLM_URL         OpenAI-compatible server (default http://localhost:8080)
-    CHANNELS        comma-separated channel names to reply in (default: all)
+--llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
+environment variables.
 """
 
 from __future__ import annotations
@@ -127,13 +126,21 @@ def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
     return "\n".join(kept)
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy bot", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--aliases", type=Path, default=Path("aliases.txt"), metavar="FILE")
     ap.add_argument("--tokens", type=Path, default=Path("bots.txt"), metavar="FILE")
     ap.add_argument("--profiles", type=Path, default=Path("profiles.txt"), metavar="FILE")
-    args = ap.parse_args(argv)
+    ap.add_argument("--llm-url", default=os.environ.get("LLM_URL", "http://localhost:8080"),
+                    help="OpenAI-compatible server (default http://localhost:8080)")
+    ap.add_argument("--channel", action="append", metavar="NAME",
+                    default=[c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()],
+                    help="channel to reply in; repeat for each (default: all)")
+    return ap
+
+
+def run(args: argparse.Namespace) -> int:
 
     import discord
 
@@ -143,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     if not personas:
         raise SystemExit(f"{args.tokens} has no token for any persona in {args.aliases}")
     profiles_path = args.profiles
-    llm_url = os.environ.get("LLM_URL", "http://localhost:8080")
-    channels = {c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()}
+    llm_url = args.llm_url
+    channels = set(args.channel)
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -223,6 +230,10 @@ def main(argv: list[str] | None = None) -> int:
 
     asyncio.run(start_all())
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(parser().parse_args(argv))
 
 
 if __name__ == "__main__":

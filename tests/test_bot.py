@@ -62,11 +62,6 @@ class Bot(unittest.TestCase):
         raw = "bob: sure thing\ncheck [link example.com] out\nsure thing\nalice: no way"
         self.assertEqual(clean_reply(raw, "bob", {"bob", "alice"}), "sure thing\ncheck out")
 
-    def test_reply_is_scrubbed(self):
-        out = clean_reply("call me on 070-123 45 67, or mail a@b.se", "bob", {"bob"})
-        self.assertNotIn("070-123", out)
-        self.assertNotIn("a@b.se", out)
-
 
 if __name__ == "__main__":
     unittest.main()

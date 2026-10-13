@@ -18,8 +18,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from understudy.profiles import read_profiles, system_prompt
+
+if TYPE_CHECKING:
+    from understudy.scrub import Scrubber
 
 # ---------------------------------------------------------------- tunables
 
@@ -32,18 +36,6 @@ VAL_FRACTION = 0.08
 
 KEEP_TYPES = {"Default", "Reply"}
 
-RE_EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b")
-RE_PHONE = re.compile(r"(?<!\d)(?:\+\d{1,3}[\s-]?)?(?:\(?\d{2,4}\)?[\s-]?){2,4}\d{2,4}(?!\d)")
-RE_INVITE = re.compile(r"(?:https?://)?(?:www\.)?discord(?:\.gg|app\.com/invite)/\S+", re.I)
-# Swedish street + number, plus a trailing postcode and town when present
-RE_ADDRESS = re.compile(
-    r"\b[^\W\d_][\w-]*?(?:gatan|gata|vägen|väg|gränd|gränden|torget|torg|backe|backen|"
-    r"stigen|allé|allén|plan|leden|slingan|platsen|stråket|kajen)\s+\d+\s?[a-zA-Z]?\b"
-    r"(?:,?\s*\d{3}\s?\d{2}(?:\s+[^\W\d_]+)?)?",
-    re.I)
-RE_URL = re.compile(r"(?:https?://|\bwww\.)(?:www\.)?([^\s/?#<>]+)[^\s<>]*?(?=[.,!?)\]'\"]*(?:[\s<>]|$))", re.I)
-RE_APP_URI = re.compile(r"\b(spotify|steam|slack|zoommtg|msteams):[^\s<>]+", re.I)
-RE_PASSWORD = re.compile(r"\b(password|passcode|lösenord|pwd)(\s*[:=]\s*)\S+", re.I)
 RE_USER_MENTION = re.compile(r"<@!?(\d+)>")
 RE_ROLE_MENTION = re.compile(r"<@&\d+>")
 RE_CHAN_MENTION = re.compile(r"<#\d+>")
@@ -144,19 +136,16 @@ def display_name(author: dict, aliases: dict[str, str]) -> str:
     return aliases.get(key) or aliases.get(f'"{key}"') or name
 
 
-def clean(content: str, mentions: list[dict], aliases: dict[str, str], scrub: bool) -> str:
+def clean(content: str, mentions: list[dict], aliases: dict[str, str],
+          scrubber: Scrubber | None = None) -> str:
     by_id = {m.get("id"): display_name(m, aliases) for m in mentions}
     content = RE_USER_MENTION.sub(lambda m: "@" + by_id.get(m.group(1), "someone"), content)
     content = RE_ROLE_MENTION.sub("@role", content)
     content = RE_CHAN_MENTION.sub("#channel", content)
 
     # before aliasing, which would rewrite names inside links and streets and strand the rest
-    if scrub:
-        # share links to albums, docs and listings stay live; the domain keeps the gist
-        content = RE_URL.sub(lambda m: f"[link {m.group(1).lower()}]", content)
-        content = RE_APP_URI.sub(lambda m: f"[link {m.group(1).lower()}]", content)
-        content = RE_ADDRESS.sub("[address]", content)
-        content = RE_PASSWORD.sub(r"\1\2[password]", content)
+    if scrubber:
+        content = scrubber.contact(content)
 
     # alias anyone named in plain text too, so pseudonyms stay consistent.
     # DCE already renders mentions as "@nickname", so those land here, not in RE_USER_MENTION
@@ -165,15 +154,13 @@ def clean(content: str, mentions: list[dict], aliases: dict[str, str], scrub: bo
         real, whole_word = unquote(key)
         content = replace_folded(content, real, aliases[key], whole_word)
 
-    if scrub:
-        content = RE_EMAIL.sub("[email]", content)
-        content = RE_INVITE.sub("[invite]", content)
-        content = RE_PHONE.sub("[number]", content)
+    if scrubber:
+        content = scrubber.names(content)
 
     return content.strip()
 
 
-def load(paths: list[Path], aliases: dict[str, str], scrub: bool, drop_bots: bool):
+def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None, drop_bots: bool):
     msgs: list[Msg] = []
     skipped = Counter()
 
@@ -191,7 +178,7 @@ def load(paths: list[Path], aliases: dict[str, str], scrub: bool, drop_bots: boo
                 skipped["bot"] += 1
                 continue
 
-            content = clean(m.get("content", ""), m.get("mentions") or [], aliases, scrub)
+            content = clean(m.get("content", ""), m.get("mentions") or [], aliases, scrubber)
             if not content:
                 skipped["empty / attachment-only"] += 1
                 continue
@@ -305,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--profiles", type=Path, metavar="FILE", default=optional("profiles.txt"),
                     help="persona profiles to put in each system prompt (see profiles.py)")
     ap.add_argument("--no-scrub", action="store_true",
-                    help="keep emails / phone numbers / invites / addresses / links / passwords verbatim")
+                    help="keep links, emails, phone numbers, addresses, towns, passwords and names verbatim")
     ap.add_argument("--keep-bots", action="store_true")
     ap.add_argument("--keep-attachment-targets", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
@@ -335,7 +322,11 @@ def main(argv: list[str] | None = None) -> int:
     personas = {fold(aliases.get(p, p)) for p in personas}
 
     profiles = read_profiles(args.profiles)
-    msgs, skipped = load(paths, aliases, not args.no_scrub, not args.keep_bots)
+    scrubber = None
+    if not args.no_scrub:
+        from understudy.scrub import Scrubber  # loads Presidio, spaCy and GLiNER
+        scrubber = Scrubber(allow={fold(fake) for fake in aliases.values()} | personas)
+    msgs, skipped = load(paths, aliases, scrubber, not args.keep_bots)
     if not msgs:
         print("nothing survived loading", file=sys.stderr)
         return 1
@@ -384,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
         print("\nunder ~500 examples is thin for a convincing persona:")
         for name in thin:
             print(f"  {name}")
+    if scrubber and scrubber.organizations:
+        print("\norganisations mentioned, kept as is; alias the ones that identify someone:")
+        for name, n in scrubber.organizations.most_common(20):
+            print(f"  {n:>6}  {name}")
     return 0
 
 

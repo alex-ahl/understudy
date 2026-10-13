@@ -30,7 +30,7 @@ llama.cpp does.
 
 ```sh
 python3 -m venv .venv && source .venv/bin/activate   # Python 3.10+
-pip install -e .
+pip install -e '.[dataset]'
 understudy dataset              # exports/ -> data/train.jsonl, data/val.jsonl
 ```
 
@@ -51,8 +51,21 @@ carl_xx=carl          # not a persona, aliased in context
 - `"REAL"=FAKE` (quoted) matches the whole word only, plus a possessive `s`.
 
 `--persona NAME` and `--alias REAL=FAKE`, each repeatable, add more on the command line.
-Emails, phone numbers, invites, links, passwords and Swedish street addresses are
-scrubbed.
+
+### Scrubbing
+
+[Presidio](https://github.com/microsoft/presidio) with a Swedish spaCy model and
+[GLiNER](https://github.com/urchade/GLiNER) replaces, in the dataset only:
+
+- links, down to their domain: `[link youtube.com]`
+- emails, phone numbers, addresses and passwords: `[email]`, `[number]`,
+  `[address]`, `[password]`
+- towns and other places: `[place]`
+- names not in `aliases.txt`: `[name]`
+
+Organisations are listed after the run, not replaced; alias the ones that identify
+someone, like an employer. The models download on the first run (about 1 GB).
+`--no-scrub` turns scrubbing off. The bots don't scrub.
 
 A persona needs ~500 examples. Below that, add channels or drop the persona.
 

@@ -6,7 +6,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# run from a temp dir: dataset picks up aliases.txt / profiles.txt from the working directory
+# run from a temp dir: dataset picks up aliases.txt / profiles.txt from the working directory.
+# --no-scrub: scrubbing loads its models per run; test_scrub covers it
 DATASET = [sys.executable, "-m", "understudy", "dataset"]
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -30,7 +31,7 @@ def run(messages, *flags):
         (tmp / "export.json").write_text(json.dumps(
             {"channel": {"name": "general"}, "messages": messages}))
         proc = subprocess.run(
-            [*DATASET, tmp / "export.json", "-o", tmp / "out", *flags],
+            [*DATASET, tmp / "export.json", "-o", tmp / "out", "--no-scrub", *flags],
             capture_output=True, text=True, cwd=tmp)
         rows = []
         for name in ("train", "val"):
@@ -160,49 +161,6 @@ class DiscordToSft(unittest.TestCase):
         Path(fh.name).unlink()
         self.assertIn("[workplace] and [workplace] office, not acmeville", by_target(rows))
 
-    def test_scrubs_contact_details(self):
-        _, rows = run([
-            msg(1, "carol", "how do i reach you", 0 * M),
-            msg(2, "dave", "yeah what's your info", 1 * M),
-            msg(3, "bob", "mail bob@example.com or join discord.gg/abc123", 2 * M),
-        ], "--persona", "bob")
-        [target] = by_target(rows)
-        self.assertEqual(target, "mail [email] or join [invite]")
-
-    def test_scrubs_street_addresses(self):
-        _, rows = run([
-            msg(1, "carol", "where do you live again", 0 * M),
-            msg(2, "dave", "yeah send the address", 1 * M),
-            msg(3, "bob", "Exempelvägen 12B, 123 45 Småby. or storgatan 3", 2 * M),
-        ], "--persona", "bob", "--alias", "exempelvägen=[place]")
-        self.assertIn("[address]. or [address]", by_target(rows))
-
-    def test_address_pattern_leaves_plain_words_alone(self):
-        _, rows = run([
-            msg(1, "carol", "how was the trip", 0 * M),
-            msg(2, "dave", "tell us everything", 1 * M),
-            msg(3, "bob", "vägen var lång, 12 mil på gatan", 2 * M),
-        ], "--persona", "bob")
-        self.assertIn("vägen var lång, 12 mil på gatan", by_target(rows))
-
-    def test_links_keep_only_their_domain(self):
-        _, rows = run([
-            msg(1, "carol", "got any pics from the trip", 0 * M),
-            msg(2, "dave", "yes send the album please", 1 * M),
-            msg(3, "bob", "here (https://photos.example.com/abc123?x=1). and www.shop.se/item/9! "
-                          "spotify:user:someone:playlist:1 <a href=\"http://a.example/x\">", 2 * M),
-        ], "--persona", "bob")
-        self.assertIn("here ([link photos.example.com]). and [link shop.se]! "
-                      "[link spotify] <a href=\"[link a.example]\">", by_target(rows))
-
-    def test_scrubs_meeting_passwords(self):
-        _, rows = run([
-            msg(1, "carol", "what is the meeting info", 0 * M),
-            msg(2, "dave", "check the invite below", 1 * M),
-            msg(3, "bob", "Password: 1CzQ9y and lösenord=hunter2 for the call", 2 * M),
-        ], "--persona", "bob")
-        self.assertIn("Password: [password] and lösenord=[password] for the call", by_target(rows))
-
     def test_profiles_go_into_the_system_prompt(self):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write("[bob]\nAlways hungry.\n")
@@ -229,7 +187,7 @@ class DiscordToSft(unittest.TestCase):
                     ],
                 }))
             proc = subprocess.run(
-                [*DATASET, tmp, "--persona", "bob", "-o", tmp / "out"],
+                [*DATASET, tmp, "--persona", "bob", "-o", tmp / "out", "--no-scrub"],
                 capture_output=True, text=True, cwd=tmp)
         self.assertRegex(proc.stdout, r"\n\s+2  bob\n")
 

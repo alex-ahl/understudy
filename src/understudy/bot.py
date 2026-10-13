@@ -110,7 +110,7 @@ def server_reply(url: str, messages: list[dict]) -> str:
 
 def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
     """The persona's own lines, cut where the model starts writing for someone else or looping,
-    with scrub placeholders and anything the dataset would have scrubbed taken out."""
+    with scrub placeholders taken out."""
     kept: list[str] = []
     for line in reply.splitlines():
         speaker, sep, rest = line.partition(": ")
@@ -124,8 +124,7 @@ def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
         if line in kept or len(kept) == MAX_LINES:
             break
         kept.append(line)
-    # placeholders the scrub writes back in are dropped too
-    return RE_PLACEHOLDER.sub("", clean("\n".join(kept), [], {}, scrub=True)).strip()
+    return "\n".join(kept)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue  # other bots, like the training data
             mentions = [{"id": str(u.id), "name": u.name,
                          "nickname": persona_of.get(u.id) or u.display_name} for u in m.mentions]
-            text = clean(m.content, mentions, aliases, scrub=True)
+            text = clean(m.content, mentions, aliases)
             if not text and not m.attachments:
                 continue
             author = persona_of.get(m.author.id) or person_name(m.author)

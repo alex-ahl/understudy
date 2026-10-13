@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dataset = []
+dataset = ["presidio-analyzer", "presidio-anonymizer", "gliner"]
 # torch is installed separately, from the index matching the CUDA version
 train = ["unsloth", "trl", "peft", "transformers", "datasets", "bitsandbytes"]
 bot = ["discord.py"]

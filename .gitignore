@@ -1,0 +1,13 @@
+# real messages from real people; never commit
+exports/
+data/
+outputs/
+aliases.txt
+profiles.txt
+bots.txt
+names.txt
+
+.venv/
+__pycache__/
+*.gguf
+.env

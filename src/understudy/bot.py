@@ -3,9 +3,10 @@
     understudy bot
 
 Each persona is its own bot account; bots.txt holds one `persona=token` line
-per persona. aliases.txt, bots.txt and profiles.txt are read from the working
-directory unless given as flags. A persona replies to the channel's recent
-conversation when someone @-mentions it or writes its name in a message.
+per persona. aliases.txt, bots.txt, profiles.txt and data/voices.json (written
+by understudy dataset) are read from the working directory unless given as
+flags. A persona replies to the channel's recent conversation when someone
+@-mentions it or writes its name in a message.
 
 --llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
 environment variables.
@@ -18,18 +19,18 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import urllib.request
 from pathlib import Path
 
-from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, Msg, build_aliases, clean, display_name,
-                                 fold, merge_bursts, read_aliases_file, render, unquote)
-from understudy.profiles import read_profiles, system_prompt
+from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, build_aliases, clean,
+                                 display_name, fold, merge_bursts, read_aliases_file, render, unquote)
+from understudy.profiles import build_messages, read_profiles
 
 log = logging.getLogger("understudy")
 
 HISTORY = 40        # raw messages; bursts and the gap cut bring it down to a conversation
-PROFILE_TAIL = 3    # profile lines go this many turns before the end of the context
 MAX_LINES = 5       # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
@@ -79,19 +80,11 @@ def conversation(msgs: list[Msg]) -> list[str]:
     return [render(t) for t in reversed(kept)]
 
 
-def build_messages(persona: str, channel: str, turns: list[str], profiles: dict[str, str]) -> list[dict]:
-    """The prompt for one reply, with the profile as the persona's own recent lines."""
-    lines = turns[-CONTEXT_TURNS:]
-    profile = profiles.get(persona.lower())
-    # the adapter reads the system prompt as a name tag but follows the conversation, and near
-    # the end of it: profile lines go in as the persona's own messages, a few turns from the end
-    if profile:
-        cut = max(len(lines) - PROFILE_TAIL, 0)
-        lines = [*lines[:cut], *(f"{persona}: {line}" for line in profile.splitlines()), *lines[cut:]]
-    return [
-        {"role": "system", "content": system_prompt(persona, channel, profiles)},
-        {"role": "user", "content": "\n".join(lines)},
-    ]
+def own_lines(persona: str, voices: dict[str, list[str]], profiles: dict[str, str]) -> list[str]:
+    """Real one-liners, then the whole profile: the most of what training put in a context."""
+    pool = voices.get(fold(persona), [])
+    profile = profiles.get(persona.lower(), "")
+    return [*random.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile.splitlines()]
 
 
 def server_reply(url: str, messages: list[dict]) -> str:
@@ -132,6 +125,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--aliases", type=Path, default=Path("aliases.txt"), metavar="FILE")
     ap.add_argument("--tokens", type=Path, default=Path("bots.txt"), metavar="FILE")
     ap.add_argument("--profiles", type=Path, default=Path("profiles.txt"), metavar="FILE")
+    ap.add_argument("--voices", type=Path, default=Path("data/voices.json"), metavar="FILE")
     ap.add_argument("--llm-url", default=os.environ.get("LLM_URL", "http://localhost:8080"),
                     help="OpenAI-compatible server (default http://localhost:8080)")
     ap.add_argument("--channel", action="append", metavar="NAME",
@@ -150,6 +144,7 @@ def run(args: argparse.Namespace) -> int:
     if not personas:
         raise SystemExit(f"{args.tokens} has no token for any persona in {args.aliases}")
     profiles_path = args.profiles
+    voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
     llm_url = args.llm_url
     channels = set(args.channel)
 
@@ -183,7 +178,9 @@ def run(args: argparse.Namespace) -> int:
         async with locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
                 turns = await history(channel)
-                messages = build_messages(persona, channel.name, turns, read_profiles(profiles_path))
+                profiles = read_profiles(profiles_path)
+                messages = build_messages(persona, channel.name, turns[-CONTEXT_TURNS:],
+                                          own_lines(persona, voices, profiles))
                 raw = await asyncio.to_thread(server_reply, llm_url, messages)
             speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
             text = clean_reply(raw, persona, speakers)

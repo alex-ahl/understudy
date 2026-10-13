@@ -28,8 +28,8 @@ or the file given with `understudy --config FILE <command>`. Start from
 - An unknown key or section stops the command.
 
 Keep private files in the repo root, where `.gitignore` covers them:
-`understudy.toml`, `aliases.txt`, `profiles.txt`, `bots.txt`, `exports/`,
-`data/`, `outputs/`. With them in place,
+`understudy.toml`, `aliases.txt`, `profiles.txt`, `bots.txt`,
+`downweight.txt`, `exports/`, `data/`, `outputs/`. With them in place,
 `python -m unittest discover -s tests` fails if a tracked file contains a name,
 profile line or token from them.
 
@@ -101,13 +101,26 @@ someone, like an employer. The models download on the first run (about 1 GB).
 `--no-scrub` turns scrubbing off. The bots don't scrub.
 
 A persona needs ~500 examples. Below that, add channels or drop the persona.
+`--max-per-persona N` samples larger personas down to N.
+
+### Shaping
+
+- Replies containing a link are dropped.
+- `--downweight FILE` (gitignored as `downweight.txt`) holds one case-insensitive
+  regex per line, `#` lines are comments; start from `downweight.example.txt`.
+  Matching replies, and matching context lines other than the one replied to,
+  are kept at 20%.
+- `data/voices.json` holds each persona's plain one-liners from the train split.
+  Every example gets up to three of them, then some of its persona's profile
+  lines, as that persona's messages a few turns from the end. The bots put
+  three of them and the whole profile in the same place.
 
 ### Persona profiles
 
 `profiles.txt` (gitignored) gives each persona two or three lines in their own
-voice; start from `profiles.example.txt`. The bots put them into the conversation
-as that persona's earlier messages, the last one closest to the reply.
-`understudy dataset` also puts them in the training system prompt.
+voice; start from `profiles.example.txt`. As described under Shaping, they go
+into the conversation as that persona's earlier messages, the last one closest
+to the reply.
 
 ## 3. Set up the training box
 

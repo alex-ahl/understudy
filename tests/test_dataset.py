@@ -1,10 +1,15 @@
 import json
+import random
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from understudy.dataset import (VOICE_EXAMPLES, Example, cap, downweight, has_link, own_lines,
+                                read_patterns, voice_pool)
 
 # run from a temp dir: dataset picks up aliases.txt / profiles.txt from the working directory.
 # --no-scrub: scrubbing loads its models per run; test_scrub covers it
@@ -161,7 +166,7 @@ class DiscordToSft(unittest.TestCase):
         Path(fh.name).unlink()
         self.assertIn("[workplace] and [workplace] office, not acmeville", by_target(rows))
 
-    def test_profiles_go_into_the_system_prompt(self):
+    def test_profiles_go_into_the_context_not_the_system_prompt(self):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
             fh.write("[bob]\nAlways hungry.\n")
         _, rows = run([
@@ -171,8 +176,9 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob", "--profiles", fh.name)
         Path(fh.name).unlink()
         [row] = rows
-        self.assertEqual(row["messages"][0]["content"],
-                         "Reply as `bob` in #general.\nAbout bob: Always hungry.")
+        self.assertEqual(row["messages"][0]["content"], "Reply as `bob` in #general.")
+        own = [l for l in row["messages"][1]["content"].splitlines() if l.startswith("bob: ")]
+        self.assertLessEqual(set(own), {"bob: Always hungry."})
 
     def test_persona_counts_sum_across_channels(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,6 +196,93 @@ class DiscordToSft(unittest.TestCase):
                 [*DATASET, tmp, "--persona", "bob", "-o", tmp / "out", "--no-scrub"],
                 capture_output=True, text=True, cwd=tmp)
         self.assertRegex(proc.stdout, r"\n\s+2  bob\n")
+
+    def test_link_replies_are_dropped(self):
+        _, rows = run([
+            msg(1, "carol", "where is everyone", 0 * M),
+            msg(2, "dave", "no clue at all", 1 * M),
+            msg(3, "bob", "look at https://example.com first", 2 * M),
+        ], "--persona", "bob")
+        self.assertEqual(rows, [])
+
+    def test_voices_file_holds_each_personas_one_liners(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "export.json").write_text(json.dumps({"channel": {"name": "general"}, "messages": [
+                msg(1, "carol", "where is everyone", 0 * M),
+                msg(2, "dave", "no clue at all", 1 * M),
+                msg(3, "bob", "probably getting food again", 2 * M),
+            ]}))
+            subprocess.run([*DATASET, tmp / "export.json", "-o", tmp / "out", "--no-scrub",
+                            "--persona", "bob"], capture_output=True, cwd=tmp)
+            voices = json.loads((tmp / "out" / "voices.json").read_text())
+        # the only example may land in val, which never feeds the pool
+        self.assertIn(voices, ({"bob": ["probably getting food again"]}, {}))
+
+
+class Always(random.Random):
+    """random() pinned, so keep-or-drop decisions are known."""
+
+    def __init__(self, value):
+        super().__init__(0)
+        self.value = value
+
+    def random(self):
+        return self.value
+
+
+def example(reply, *lines, persona="bob"):
+    return Example(persona, "general", list(lines), reply)
+
+
+class Shaping(unittest.TestCase):
+    def test_links(self):
+        for text in ("see [link youtube.com]", "https://x.io/a", "www.x.io"):
+            self.assertTrue(has_link(text), text)
+        self.assertFalse(has_link("no links [place] here"))
+
+    def test_patterns_file_skips_comments_and_blanks(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+            fh.write("# plans\ntonight\n\n\\bmeet up\\b\n")
+        pattern = read_patterns(Path(fh.name))
+        Path(fh.name).unlink()
+        self.assertTrue(pattern.search("Shall we MEET UP?"))
+        self.assertTrue(pattern.search("tonight then"))
+        self.assertFalse(pattern.search("plans"))
+
+    def test_downweight_drops_matches_but_never_the_line_replied_to(self):
+        pattern = re.compile("tonight")
+        examples = [example("sure, tonight works", "carol: hi", "dave: tonight?"),
+                    example("not me", "carol: tonight?", "dave: and you?", "carol: tonight?")]
+        kept = downweight(examples, pattern, Always(0.99))
+        self.assertEqual(kept, [example("not me", "dave: and you?", "carol: tonight?")])
+        self.assertEqual(downweight(examples, pattern, Always(0.0)), examples)
+
+    def test_cap_samples_each_persona_down(self):
+        examples = [example(f"bob {i}") for i in range(5)] + [example("alice", persona="alice")]
+        capped = cap(examples, 2, random.Random(0))
+        self.assertEqual(sum(e.persona == "bob" for e in capped), 2)
+        self.assertIn(example("alice", persona="alice"), capped)
+
+    def test_voice_pool_takes_plain_one_liners(self):
+        examples = [example("a plain one-liner here"), example("two\nlines here"), example("short"),
+                    example("see [link x.io] now"), example("we meet tonight then"),
+                    example("by alice and nobody else", persona="Alice")]
+        self.assertEqual(voice_pool(examples, re.compile("tonight")),
+                         {"bob": ["a plain one-liner here"], "alice": ["by alice and nobody else"]})
+
+    def test_own_lines_never_repeat_the_reply_and_keep_profile_order(self):
+        pool = ["the reply itself", "other one", "another one", "third one", "fourth one"]
+        profile = ["first profile line", "second profile line", "last profile line"]
+        seen_empty = False
+        for seed in range(50):
+            lines = own_lines("the reply itself", pool, profile, random.Random(seed))
+            voices = [l for l in lines if l not in profile]
+            self.assertNotIn("the reply itself", lines)
+            self.assertLessEqual(len(voices), VOICE_EXAMPLES)
+            self.assertEqual(lines[len(voices):], [l for l in profile if l in lines])
+            seen_empty |= not lines
+        self.assertTrue(seen_empty)
 
 
 if __name__ == "__main__":

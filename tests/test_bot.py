@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from understudy.bot import (build_messages, clean_reply, conversation, load_personas, named_personas,
+from understudy.bot import (clean_reply, own_lines, conversation, load_personas, named_personas,
                             read_tokens)
 from understudy.dataset import Msg
 
@@ -49,14 +49,12 @@ class Bot(unittest.TestCase):
         ])
         self.assertEqual(turns, ["bob: new topic starts\nstill bob", "carol: answering bob"])
 
-    def test_profile_goes_in_near_the_end_as_the_personas_lines(self):
-        turns = [f"p{i}: line {i}" for i in range(6)]
-        system, user = build_messages("bob", "general", turns, {"bob": "Likes trains.\nHates Mondays."})
-        self.assertEqual(user["content"].splitlines(),
-                         ["p0: line 0", "p1: line 1", "p2: line 2",
-                          "bob: Likes trains.", "bob: Hates Mondays.",
-                          "p3: line 3", "p4: line 4", "p5: line 5"])
-        self.assertIn("About bob: Likes trains. Hates Mondays.", system["content"])
+    def test_own_lines_are_voice_lines_then_the_whole_profile(self):
+        voices = {"bob": ["one", "two", "three", "four"]}
+        lines = own_lines("Bob", voices, {"bob": "Likes trains.\nHates Mondays."})
+        self.assertEqual(lines[3:], ["Likes trains.", "Hates Mondays."])
+        self.assertLessEqual(set(lines[:3]), set(voices["bob"]))
+        self.assertEqual(own_lines("carol", voices, {}), [])
 
     def test_reply_keeps_only_the_personas_own_clean_lines(self):
         raw = "bob: sure thing\ncheck [link example.com] out\nsure thing\nalice: no way"

@@ -7,6 +7,7 @@ profiles.txt
 bots.txt
 names.txt
 understudy.toml
+downweight.txt
 
 .venv/
 __pycache__/

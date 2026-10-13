@@ -13,6 +13,8 @@ out = "data"
 aliases = "aliases.txt"
 profiles = "profiles.txt"
 persona = ["bob", "alice"]  # adds to the * lines in aliases.txt
+downweight = "downweight.txt"
+max_per_persona = 1000
 
 [train]
 data = "data"
@@ -35,5 +37,6 @@ port = 8080
 
 [bot]
 tokens = "bots.txt"
+voices = "data/voices.json"
 llm_url = "http://localhost:8080"
 channel = ["general"]

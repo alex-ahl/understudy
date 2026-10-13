@@ -20,8 +20,8 @@ from understudy.train import MODEL
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy convert", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--adapter", type=Path, default=Path("outputs/adapter"))
-    ap.add_argument("--out", type=Path, default=Path("outputs/adapter.gguf"))
+    ap.add_argument("--adapter", type=Path, default=Path("private/outputs/adapter"))
+    ap.add_argument("--out", type=Path, default=Path("private/outputs/adapter.gguf"))
     ap.add_argument("--model", default=MODEL, help="the base the adapter was trained on")
     ap.add_argument("--llama-cpp", type=Path, default=Path("../llama.cpp"), metavar="DIR",
                     help="a llama.cpp checkout (default ../llama.cpp)")

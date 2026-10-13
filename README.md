@@ -15,23 +15,26 @@ llama.cpp does.
 
 ## Settings
 
-Every command reads `understudy.toml` (gitignored) from the working directory,
-or the file given with `understudy --config FILE <command>`. Start from
-`understudy.example.toml`.
+Everything private lives in `private/` (gitignored): the settings file, the
+export, the dataset and the trained adapter. Commands run from the repo root.
 
-- Keys are the commands' long options with `_` for `-`: `max_seq_length = 1536`
-  for `--max-seq-length 1536`. `understudy <command> -h` lists them.
-- A top-level key applies to every command with that option; a `[command]`
-  section applies to that command and wins over the top level.
-- Flags on the command line win over the file.
-- Relative paths resolve against the file's directory.
-- An unknown key or section stops the command.
+```sh
+mkdir -p private && cp understudy.example.toml private/understudy.toml
+```
 
-Keep private files in the repo root, where `.gitignore` covers them:
-`understudy.toml`, `aliases.txt`, `profiles.txt`, `bots.txt`,
-`downweight.txt`, `exports/`, `data/`, `outputs/`. With them in place,
-`python -m unittest discover -s tests` fails if a tracked file contains a name,
-profile line or token from them.
+`private/understudy.toml` is the only file to edit; `understudy.example.toml`
+explains every setting. It holds:
+
+- `[persona.NAME]`, one per person to imitate: their Discord `names`, a
+  `profile` in their own voice, and their bot's `token`.
+- `[aliases]`: everyone else to rename.
+- Settings for each command, all optional. Keys are the long options with `_`
+  for `-`; flags on the command line win over the file. An unknown key stops
+  the command.
+
+`understudy --config FILE <command>` reads another file. With
+`private/understudy.toml` in place, `python -m unittest discover -s tests`
+fails if a tracked file contains a name, profile line or token from it.
 
 ## Pipeline
 
@@ -42,8 +45,9 @@ understudy pipeline --from convert          # start from an existing adapter
 ```
 
 Each stage runs with the settings file's values and stops the pipeline when it
-fails. Stages run wherever their requirements are installed; copy `data/` or
-`outputs/` between machines to split the pipeline across them. `serve` and `bot`
+fails. Stages run wherever their requirements are installed; copy
+`private/data/` or `private/outputs/` between machines to split the pipeline
+across them. `serve` and `bot`
 run until stopped and are started separately.
 
 ## 1. Export
@@ -55,7 +59,7 @@ run until stopped and are started separately.
 3. Export:
 
    ```sh
-   docker run --rm -v "$PWD/exports:/out" tyrrrz/discordchatexporter:stable \
+   docker run --rm -v "$PWD/private/exports:/out" tyrrrz/discordchatexporter:stable \
      exportguild -t "$BOT_TOKEN" -g "$GUILD_ID" -f Json -o /out/
    ```
 
@@ -64,24 +68,24 @@ run until stopped and are started separately.
 ```sh
 python3 -m venv .venv && source .venv/bin/activate   # Python 3.11+
 pip install -e '.[dataset]'
-understudy dataset              # exports/ -> data/train.jsonl, data/val.jsonl
+understudy dataset              # private/exports/ -> private/data/
 ```
 
-`aliases.txt` lists who to imitate and which names to replace. One entry per
-line, `#` starts a comment:
+The `[persona.*]` tables are who to imitate. Each persona's `names`, and every
+name in `[aliases]`, is replaced everywhere: authors, mentions and plain text.
 
-```
-*robert_1987=bob      # persona, aliased
-robert=bob            # extra spellings of the same person
-*alice                # persona, real name kept
-carl_xx=carl          # not a persona, aliased in context
+```toml
+[persona.bob]
+names = ["robert_1987", "Robban"]
+
+[aliases]
+carl_xx = "carl"
 ```
 
-- `*` marks a persona.
-- `REAL=FAKE` replaces the name everywhere: authors, mentions, and plain text.
-  Any word containing `REAL` becomes `FAKE` (`roberts` → `bob`), so short names
-  also catch unrelated words. Case, accents, and stray marks like `´` are ignored.
-- `"REAL"=FAKE` (quoted) matches the whole word only, plus a possessive `s`.
+- Case, accents and stray marks like `´` are ignored.
+- Names match whole words, plus a possessive `s`: `roberts` → `bob`. A name
+  inside a longer word stays as it is; list compounds you want replaced.
+- Renaming one name to two different pseudonyms is an error.
 
 `--persona NAME` and `--alias REAL=FAKE`, each repeatable, add more on the command line.
 
@@ -94,7 +98,7 @@ carl_xx=carl          # not a persona, aliased in context
 - emails, phone numbers, addresses and passwords: `[email]`, `[number]`,
   `[address]`, `[password]`
 - towns and other places: `[place]`
-- names not in `aliases.txt`: `[name]`
+- names not renamed by the config: `[name]`
 
 Organisations are listed after the run, not replaced; alias the ones that identify
 someone, like an employer. The models download on the first run (about 1 GB).
@@ -106,21 +110,18 @@ A persona needs ~500 examples. Below that, add channels or drop the persona.
 ### Shaping
 
 - Replies containing a link are dropped.
-- `--downweight FILE` (gitignored as `downweight.txt`) holds one case-insensitive
-  regex per line, `#` lines are comments; start from `downweight.example.txt`.
-  Matching replies, and matching context lines other than the one replied to,
-  are kept at 20%.
-- `data/voices.json` holds each persona's plain one-liners from the train split.
-  Every example gets up to three of them, then some of its persona's profile
-  lines, as that persona's messages a few turns from the end. The bots put
-  three of them and the whole profile in the same place.
+- `downweight` lists case-insensitive regexes. Matching replies, and matching
+  context lines other than the one replied to, are kept at 20%.
+- `private/data/voices.json` holds each persona's plain one-liners from the
+  train split. Every example gets up to three of them, then some of its
+  persona's profile lines, as that persona's messages a few turns from the end.
+  The bots put three of them and the whole profile in the same place.
 
 ### Persona profiles
 
-`profiles.txt` (gitignored) gives each persona two or three lines in their own
-voice; start from `profiles.example.txt`. As described under Shaping, they go
-into the conversation as that persona's earlier messages, the last one closest
-to the reply.
+A persona's `profile` is two or three lines in their own voice. As described
+under Shaping, they go into the conversation as that persona's earlier
+messages, the last one closest to the reply.
 
 ## 3. Set up the training box
 
@@ -137,17 +138,17 @@ Under WSL2, keep the repo and data under `~/`, not `/mnt/c/`.
 ## 4. Train
 
 ```sh
-understudy stats                          # token lengths of data/train.jsonl
+understudy stats                          # token lengths of private/data/train.jsonl
 understudy train --max-seq-length 1024    # just above p95
 ```
 
 `stats` warns when p95 is above `--max-seq-length`. The adapter lands in
-`outputs/adapter/`. `--model` picks another base model; the
+`private/outputs/adapter/`. `--model` picks another base model; the
 response masking in `understudy train` assumes the Llama 3 chat format.
 
 ## 5. Serve
 
-With the adapter in `outputs/adapter/`:
+With the adapter in `private/outputs/adapter/`:
 
 ```sh
 brew install llama.cpp          # or build it; llama-server must be on PATH
@@ -156,7 +157,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 pip install -r ../llama.cpp/requirements/requirements-convert_lora_to_gguf.txt
 
-understudy convert --llama-cpp ../llama.cpp   # -> outputs/adapter.gguf
+understudy convert --llama-cpp ../llama.cpp   # -> private/outputs/adapter.gguf
 understudy serve                              # downloads the base model on first run, serves on :8080
 ```
 
@@ -174,7 +175,7 @@ Each persona is its own bot account, running next to `llama-server`.
 2. OAuth2 → URL Generator for each app: scope `bot`, permissions
    `View Channels`, `Read Message History`, `Send Messages`. Open the URL and add
    the bot to the server.
-3. Put the tokens in `bots.txt` (gitignored), one `persona=token` per line.
+3. Put each token in its persona's table: `token = "..."`.
 4. Start them:
 
    ```sh

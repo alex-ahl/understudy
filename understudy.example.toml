@@ -1,42 +1,120 @@
-# Copy to understudy.toml (gitignored). Every key is optional and mirrors a
-# command's long option with _ for -; `understudy <command> -h` lists them.
-# Top-level keys apply to every command with that option, a [section] to one
-# command. Relative paths resolve against this file's directory.
+# understudy settings. Copy to private/understudy.toml (gitignored) and edit;
+# every command reads it from there, or from `understudy --config FILE`.
+#
+# Only [persona.*] is required. Everything else is optional and shows its
+# default, except where marked "example"; delete what you don't change. Flags
+# on the command line override values here, e.g. `understudy train --epochs 2`.
+# Paths are relative to the repo root.
+# Names below are made up.
 
-model = "AI-Sweden-Models/Llama-3-8B-instruct"
-max_seq_length = 1024       # stats warns when p95 is above it
-seed = 0
 
-[dataset]
-input = "exports"
-out = "data"
-aliases = "aliases.txt"
-profiles = "profiles.txt"
-persona = ["bob", "alice"]  # adds to the * lines in aliases.txt
-downweight = "downweight.txt"
-max_per_persona = 1000
+# -------------------------------------------------------- shared settings
 
-[train]
-data = "data"
-out = "outputs/adapter"
-epochs = 3
-rank = 16
+# Top-level keys apply to every command that has the option; a [command]
+# section below wins over them. They must come first: in TOML, a key after a
+# [table] header belongs to that table.
 
-[convert]
-adapter = "outputs/adapter"
-out = "outputs/adapter.gguf"
-llama_cpp = "../llama.cpp"
+model = "AI-Sweden-Models/Llama-3-8B-instruct"   # base model: stats, train, convert
+max_seq_length = 1024       # tokens per example: stats warns when p95 is above it,
+                            # train truncates longer ones. Set it just above p95.
+seed = 0                    # dataset shuffling and sampling, train initialisation
 
-[serve]
-adapter = "outputs/adapter.gguf"
-base_hf = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"
-# base_gguf = "models/base.gguf"
-lora_scale = 1.0
-context = 4096
+
+# ------------------------------------------------------------------ people
+
+# One table per persona to imitate. The table name is the pseudonym the model
+# and the bots use. A name that isn't plain a-z, 0-9, _ or - needs quotes:
+# [persona."zoë"].
+#
+#   names    how this person appears in Discord (account name, server nickname,
+#            other spellings). All of them become the pseudonym, everywhere:
+#            as authors, in @-mentions and in plain text.
+#   profile  two or three lines written the way the person writes in the chat.
+#            They go into the conversation as the persona's own messages; the
+#            last line is closest to the reply and comes through most.
+#   token    the Discord bot token for this persona's bot account. Personas
+#            without a token are trained but don't get a bot.
+
+[persona.bob]
+names = ["robert_1987", "Robert", "Robban"]
+profile = [
+  "gaming again tonight, anyone in?",
+  "nah that phone is overpriced junk, not buying it",
+]
+token = "PASTE-BOB'S-BOT-TOKEN"
+
+[persona.alice]             # already called alice in Discord: no names needed
+profile = [
+  "bought another new laptop, the most expensive one obviously",
+  "I'm right and you know it",
+]
+
+[persona.carol]             # trained, but no bot: no token
+names = ["caroline.k"]
+
+# Everyone else to rename: real name = what to write instead. Use it for people
+# who aren't personas, and for anything that identifies someone, like an
+# employer or a home town.
+#
+# Names match whole words, plus a possessive s ("roberts" -> "bob"; "super"
+# keeps its "per"), ignoring case, accents and stray marks like ´. A name
+# inside a longer word stays: list compounds or nicknames you want replaced.
+
+[aliases]
+dave_the_man = "dave"
+"Dave Smith" = "dave"       # spaces need quotes, like any non-bare key
+acme = "[workplace]"
+springfield = "[place]"
+
+
+# --------------------------------------------------------------- commands
+
+[dataset]                   # understudy dataset: Discord export -> training data
+input = "private/exports"   # DiscordChatExporter JSON file, or a directory of them
+out = "private/data"        # writes train.jsonl, val.jsonl and voices.json
+persona = []                # extra personas by name, on top of [persona.*]
+alias = []                  # extra renames as "REAL=FAKE", on top of [aliases]
+max_per_persona = 1000      # example; default no cap. Samples larger personas down to
+                            # this many examples, so the big talkers don't drown out the rest.
+# Example; default none. Replies matching any of these case-insensitive regexes
+# are kept at 20%, and so are matching lines in the conversation before a reply,
+# except the line being replied to. Use it for topics the model drifts into.
+# Single quotes keep backslashes literal.
+downweight = [
+  '\b(tonight|this weekend|tomorrow)\b',
+  '\b(meet up|hang out|grab a beer)\b',
+  '\b\d{1,2}:\d{2}\b',      # clock times
+]
+no_scrub = false            # true keeps links, emails, numbers, places and unknown names verbatim
+keep_bots = false           # true keeps messages written by bots
+keep_attachment_targets = false  # true trains on replies that came with an image
+
+[stats]                     # understudy stats: token lengths of the training data
+data = "private/data/train.jsonl"
+
+[train]                     # understudy train: needs an NVIDIA GPU
+data = "private/data"
+out = "private/outputs/adapter"
+epochs = 3                  # passes over the data; more copies the chat more literally
+rank = 16                   # LoRA rank; higher mostly buys verbatim memorisation
+lr = 2e-4                   # learning rate
+grad_accum = 16             # examples per optimiser step
+
+[convert]                   # understudy convert: adapter -> GGUF for llama-server
+adapter = "private/outputs/adapter"
+out = "private/outputs/adapter.gguf"
+llama_cpp = "../llama.cpp"  # a llama.cpp checkout, for its convert_lora_to_gguf.py
+
+[serve]                     # understudy serve: llama-server with the adapter
+adapter = "private/outputs/adapter.gguf"
+base_hf = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"  # downloaded on first run
+# base_gguf = "private/outputs/base/model.gguf"  # a local base instead; wins over base_hf
+lora_scale = 1.0            # above 1.0 exaggerates the personas; gibberish somewhere past 2
+context = 4096              # llama-server's context size in tokens
 port = 8080
+llama_server = "llama-server"  # the binary, if it isn't on PATH
 
-[bot]
-tokens = "bots.txt"
-voices = "data/voices.json"
-llm_url = "http://localhost:8080"
-channel = ["general"]
+[bot]                       # understudy bot: one Discord bot per persona with a token
+voices = "private/data/voices.json"   # written by understudy dataset
+llm_url = "http://localhost:8080"     # any OpenAI-compatible server
+channel = []                # channel names to reply in; empty means all

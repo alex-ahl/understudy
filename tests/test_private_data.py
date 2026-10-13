@@ -1,44 +1,35 @@
 """Fails when a tracked file contains a name, profile line or token from the local,
-gitignored private files. Skipped where those files don't exist, as in a fresh clone."""
+gitignored private/understudy.toml. Skipped where it doesn't exist, as in a fresh clone."""
 
 import re
 import subprocess
+import tomllib
 import unittest
 from pathlib import Path
 
-from understudy.dataset import fold
+from understudy.people import fold
 
 ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "private" / "understudy.toml"
 MIN_NAME = 3        # shorter names match too many ordinary words
 MIN_LINE = 15
 
 
-def entries(name: str) -> list[str]:
-    path = ROOT / name
-    if not path.exists():
-        return []
-    return [line.split("#", 1)[0].strip() for line in path.read_text(encoding="utf-8").splitlines()]
-
-
 def secrets() -> tuple[set[str], set[str]]:
     """Names to match as whole words, and lines and tokens to match anywhere, all folded."""
+    if not CONFIG.exists():
+        return set(), set()
+    config = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
     names, verbatim = set(), set()
-    for line in entries("aliases.txt"):
-        for part in re.split(r"[=,]", line.lstrip("*")):
-            part = part.strip().strip('"')
-            if len(part) >= MIN_NAME and not part.startswith("["):
-                names.add(fold(part))
-    for line in entries("profiles.txt"):
-        if line.startswith("[") and line.endswith("]"):
-            names.add(fold(line[1:-1].strip()))
-        elif len(line) >= MIN_LINE:
-            verbatim.add(fold(line))
-    for line in entries("bots.txt"):
-        persona, _, token = line.partition("=")
-        names.add(fold(persona.strip()))
-        if token.strip():
-            verbatim.add(fold(token.strip()))
-    return {n for n in names if len(n) >= MIN_NAME}, verbatim
+    for persona, table in config.get("persona", {}).items():
+        names |= {persona, *table.get("names", [])}
+        verbatim |= {line for line in table.get("profile", []) if len(line) >= MIN_LINE}
+        if table.get("token"):
+            verbatim.add(table["token"])
+    for real, fake in config.get("aliases", {}).items():
+        names |= {real, fake}
+    names = {fold(n) for n in names if not n.startswith("[")}
+    return {n for n in names if len(n) >= MIN_NAME}, {fold(v) for v in verbatim}
 
 
 def tracked() -> list[Path]:
@@ -51,7 +42,7 @@ class PrivateData(unittest.TestCase):
         names, verbatim = secrets()
         files = tracked()
         if not (names or verbatim) or not files:
-            self.skipTest("no private files or no git checkout")
+            self.skipTest("no private/understudy.toml or no git checkout")
         word = re.compile(r"(?<!\w)(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
                           + r")(?!\w)") if names else None
         hits = []

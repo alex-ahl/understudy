@@ -1,6 +1,6 @@
 """Turn DiscordChatExporter JSON exports into persona fine-tuning data.
 
-    understudy dataset exports/ --persona bob --persona alice -o data/
+    understudy dataset private/exports/ --persona bob --persona alice -o private/data/
 
 Reads DCE JSON, merges message bursts, splits on conversation gaps, windows
 context, and writes train.jsonl / val.jsonl in the chat-messages format.
@@ -13,14 +13,14 @@ import json
 import random
 import re
 import sys
-import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from understudy.profiles import build_messages, read_profiles
+from understudy.people import fold, read as read_people, rename
+from understudy.prompt import build_messages
 
 if TYPE_CHECKING:
     from understudy.scrub import Scrubber
@@ -73,69 +73,6 @@ class Turn:
     had_attachment: bool = False
 
 
-# ------------------------------------------------------------------ names
-
-def fold_char(ch: str) -> str:
-    """Lowercase, accents stripped; stray accent marks like ´ fold to nothing."""
-    if unicodedata.category(ch) == "Sk":
-        return ""
-    base = unicodedata.normalize("NFD", ch)
-    return "".join(c for c in base if not unicodedata.combining(c)).lower()
-
-
-def fold(text: str) -> str:
-    return "".join(fold_char(ch) for ch in text)
-
-
-def unquote(real: str) -> tuple[str, bool]:
-    """A quoted alias name ("acme") matches whole words only."""
-    if len(real) > 2 and real[0] == real[-1] == '"':
-        return real[1:-1], True
-    return real, False
-
-
-def replace_folded(content: str, real: str, fake: str, whole_word: bool = False) -> str:
-    """Replace every word containing `real` with `fake`, matching on folded text."""
-    folded, origin = [], []
-    for i, ch in enumerate(content):
-        for f in fold_char(ch):
-            folded.append(f)
-            origin.append(i)
-    folded = "".join(folded)
-
-    spans = [(origin[m.start()], origin[m.end() - 1] + 1)
-             for m in re.finditer(rf"(?<!\w){re.escape(real)}s?(?!\w)" if whole_word
-                                  else rf"\w*{re.escape(real)}\w*", folded)]
-    for start, end in reversed(spans):
-        content = content[:start] + fake + content[end:]
-    return content
-
-
-def read_aliases_file(path: Path) -> tuple[list[str], list[str]]:
-    """REAL=FAKE lines, and the names marked as personas with a leading *."""
-    pairs, marked = [], []
-    for line in (l.split("#", 1)[0].strip() for l in path.read_text(encoding="utf-8").splitlines()):
-        if line.startswith("*"):
-            line = line[1:].strip()
-            marked.append(line.partition("=")[2] or line)
-            if "=" not in line:
-                continue
-        if line:
-            pairs.append(line)
-    return pairs, marked
-
-
-def build_aliases(pairs: list[str]) -> dict[str, str]:
-    """REAL=FAKE pairs keyed by folded real name; raises ValueError on a malformed pair."""
-    aliases = {}
-    for pair in pairs:
-        real, _, fake = pair.partition("=")
-        if not real.strip() or not fake.strip():
-            raise ValueError(f"alias wants REAL=FAKE, got {pair!r}")
-        aliases[fold(real.strip())] = fake.strip()  # quotes survive folding
-    return aliases
-
-
 # ------------------------------------------------------------------ loading
 
 def parse_ts(raw: str) -> datetime:
@@ -144,8 +81,7 @@ def parse_ts(raw: str) -> datetime:
 
 def display_name(author: dict, aliases: dict[str, str]) -> str:
     name = (author.get("nickname") or author.get("name") or "unknown").strip()
-    key = fold(name)
-    return aliases.get(key) or aliases.get(f'"{key}"') or name
+    return aliases.get(fold(name)) or name
 
 
 def clean(content: str, mentions: list[dict], aliases: dict[str, str],
@@ -161,10 +97,7 @@ def clean(content: str, mentions: list[dict], aliases: dict[str, str],
 
     # alias anyone named in plain text too, so pseudonyms stay consistent.
     # DCE already renders mentions as "@nickname", so those land here, not in RE_USER_MENTION
-    # longest first, so "roberta" is replaced before "robert" can claim it
-    for key in sorted(aliases, key=lambda k: len(unquote(k)[0]), reverse=True):
-        real, whole_word = unquote(key)
-        content = replace_folded(content, real, aliases[key], whole_word)
+    content = rename(content, aliases)
 
     if scrubber:
         content = scrubber.names(content)
@@ -282,12 +215,8 @@ def has_link(text: str) -> bool:
     return bool(RE_LINK.search(text))
 
 
-def read_patterns(path: Path | None) -> re.Pattern | None:
-    """One case-insensitive regex per line; blank lines and lines starting with # are skipped."""
-    if not path:
-        return None
-    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines()]
-    patterns = [l for l in lines if l and not l.startswith("#")]
+def any_of(patterns: list[str]) -> re.Pattern | None:
+    """One case-insensitive regex matching any of the patterns."""
     return re.compile("|".join(f"(?:{p})" for p in patterns), re.IGNORECASE) if patterns else None
 
 
@@ -338,34 +267,25 @@ def own_lines(reply: str, pool: list[str], profile: list[str], rng: random.Rando
 
 # -------------------------------------------------------------------- main
 
-def optional(name: str) -> Path | None:
-    """A file in the working directory, if it's there."""
-    return Path(name) if Path(name).exists() else None
-
-
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy dataset", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", type=Path, nargs="?", default=Path("exports"),
-                    help="DCE .json file or a directory of them (default exports/)")
+    ap.add_argument("input", type=Path, nargs="?", default=Path("private/exports"),
+                    help="DCE .json file or a directory of them (default private/exports/)")
     ap.add_argument("--persona", action="append", default=[],
-                    help="name to imitate; repeat for each (matches name or nickname)")
-    ap.add_argument("-o", "--out", type=Path, default=Path("data"))
+                    help="name to imitate, on top of the config's [persona.NAME] tables; repeatable")
+    ap.add_argument("-o", "--out", type=Path, default=Path("private/data"))
     ap.add_argument("--alias", action="append", default=[], metavar="REAL=FAKE",
-                    help="pseudonymize a name everywhere it appears")
-    ap.add_argument("--aliases", type=Path, metavar="FILE", default=optional("aliases.txt"),
-                    help="REAL=FAKE per line, # comments, a leading * marks a persona "
-                         "(*NAME alone for one without an alias), \"REAL\" matches whole words")
-    ap.add_argument("--profiles", type=Path, metavar="FILE", default=optional("profiles.txt"),
-                    help="persona profiles (see profiles.py)")
-    ap.add_argument("--downweight", type=Path, metavar="FILE",
-                    help=f"regex per line; matching replies and context lines are kept at {KEEP * 100:.0f}%%")
+                    help="pseudonymize a name everywhere it appears, on top of the config's [aliases]")
+    ap.add_argument("--downweight", action="append", default=[], metavar="REGEX",
+                    help=f"matching replies and context lines are kept at {KEEP * 100:.0f}%%; repeatable")
     ap.add_argument("--max-per-persona", type=int, metavar="N", help="sample each persona down to N examples")
     ap.add_argument("--no-scrub", action="store_true",
                     help="keep links, emails, phone numbers, addresses, towns, passwords and names verbatim")
     ap.add_argument("--keep-bots", action="store_true")
     ap.add_argument("--keep-attachment-targets", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
+    ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
 
@@ -375,25 +295,18 @@ def run(args: argparse.Namespace) -> int:
         print(f"no .json exports under {args.input}", file=sys.stderr)
         return 1
 
-    pairs = list(args.alias)
-    marked = []
-    if args.aliases:
-        file_pairs, marked = read_aliases_file(args.aliases)
-        pairs += file_pairs
-
     try:
-        aliases = build_aliases(pairs)
+        people = read_people(args.people, args.persona, args.alias)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
-
-    personas = {fold(unquote(p.strip())[0]) for p in args.persona + marked}
-    if not personas:
-        print("no personas: pass --persona or mark lines in --aliases with *", file=sys.stderr)
+    if not people.personas:
+        print("no personas: add [persona.NAME] tables to the config or pass --persona", file=sys.stderr)
         return 1
-    personas = {fold(aliases.get(p, p)) for p in personas}
+    aliases = people.aliases
+    personas = {fold(p.name) for p in people.personas}
+    profiles = {fold(p.name): p.profile for p in people.personas}
 
-    profiles = read_profiles(args.profiles)
     scrubber = None
     if not args.no_scrub:
         from understudy.scrub import Scrubber  # loads Presidio, spaCy and GLiNER
@@ -426,7 +339,7 @@ def run(args: argparse.Namespace) -> int:
     built = len(examples)
     examples = [e for e in examples if not has_link(e.reply)]
     dropped = {"link": built - len(examples)}
-    pattern = read_patterns(args.downweight)
+    pattern = any_of(args.downweight)
     if pattern:
         n = len(examples)
         examples = downweight(examples, pattern, rng)
@@ -441,14 +354,13 @@ def run(args: argparse.Namespace) -> int:
     val, train = examples[:cut], examples[cut:]
     # from train only, so no val reply shows up in a training context
     voices = voice_pool(train, pattern)
-    profile_lines = {name: profile.splitlines() for name, profile in profiles.items()}
 
     args.out.mkdir(parents=True, exist_ok=True)
     for name, rows in (("train", train), ("val", val)):
         with (args.out / f"{name}.jsonl").open("w", encoding="utf-8") as fh:
             for e in rows:
                 own = own_lines(e.reply, voices.get(fold(e.persona), []),
-                                profile_lines.get(e.persona.lower(), []), rng)
+                                profiles.get(fold(e.persona), []), rng)
                 messages = build_messages(e.persona, e.channel, e.lines, own)
                 messages.append({"role": "assistant", "content": e.reply})
                 fh.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")

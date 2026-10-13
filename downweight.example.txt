@@ -1,7 +1,0 @@
-# Copy to downweight.txt (gitignored). One case-insensitive regex per line;
-# lines starting with # are comments. Matching replies, and matching context
-# lines other than the one replied to, are kept at 20%. Example: meetup planning.
-\b(tonight|this weekend|tomorrow)\b
-\b(meet|meet up|hang out)\b
-\b(pick (you|me) up|grab a beer)\b
-\b\d{1,2}:\d{2}\b

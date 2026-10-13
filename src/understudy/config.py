@@ -1,15 +1,19 @@
-"""understudy.toml: settings for every command, kept out of git.
+"""private/understudy.toml: people and settings for every command, kept out of git.
 
-    model = "AI-Sweden-Models/Llama-3-8B-instruct"
-    max_seq_length = 1536
+    [persona.bob]                   # who to imitate (see people.py)
+    names = ["robert_1987"]
 
-    [train]
+    [aliases]                       # who else to rename
+    carl_xx = "carl"
+
+    max_seq_length = 1536           # top level: every command with that option
+
+    [train]                         # a section: that command only
     epochs = 3
 
-Keys are the long option names with `_` for `-`. A top-level key goes to every
-command that has that option; a key in a [command] section goes to that command
-only and wins over the top level. Flags on the command line win over both.
-Relative paths resolve against the directory holding the config file.
+Option keys are the long option names with `_` for `-`. A [command] key wins
+over a top-level one, and flags on the command line win over both. Paths are
+relative to the working directory, like the defaults.
 """
 
 from __future__ import annotations
@@ -18,7 +22,9 @@ import argparse
 import tomllib
 from pathlib import Path
 
-DEFAULT = Path("understudy.toml")
+DEFAULT = Path("private/understudy.toml")
+PEOPLE = ("persona", "aliases")
+PERSONA_KEYS = {"names": list, "profile": list, "token": str}
 
 
 class ConfigError(Exception):
@@ -39,10 +45,24 @@ def options(parser: argparse.ArgumentParser) -> dict[str, argparse.Action]:
 
 def check(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> None:
     """Raises ConfigError on a section or key no command has, so a typo can't fall back to a default."""
+    for name, table in config.get("persona", {}).items():
+        if not isinstance(table, dict):
+            raise ConfigError(f"persona.{name} must be a table: [persona.{name}]")
+        for key, value in table.items():
+            if key not in PERSONA_KEYS:
+                raise ConfigError(f"[persona.{name}] has no key {key}; keys are {', '.join(PERSONA_KEYS)}")
+            if not isinstance(value, PERSONA_KEYS[key]):
+                raise ConfigError(f"[persona.{name}] {key} must be a {PERSONA_KEYS[key].__name__}")
+    for real, fake in config.get("aliases", {}).items():
+        if not isinstance(fake, str):
+            raise ConfigError(f"[aliases] {real} must be a string")
     for key, value in config.items():
+        if key in PEOPLE:
+            continue
         if isinstance(value, dict):
             if key not in parsers:
-                raise ConfigError(f"unknown section [{key}]; commands are {', '.join(parsers)}")
+                raise ConfigError(f"unknown section [{key}]; sections are "
+                                  f"{', '.join([*PEOPLE, *parsers])}")
             unknown = sorted(set(value) - set(options(parsers[key])))
             if unknown:
                 raise ConfigError(f"[{key}] has no option {', '.join(unknown)}")
@@ -50,15 +70,11 @@ def check(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> None:
             raise ConfigError(f"no command has an option {key}")
 
 
-def defaults(config: dict, command: str, parser: argparse.ArgumentParser, base: Path) -> dict:
+def defaults(config: dict, command: str, parser: argparse.ArgumentParser) -> dict:
     """The config's values for one command, as argparse defaults."""
     known = options(parser)
     shared = {k: v for k, v in config.items() if not isinstance(v, dict) and k in known}
     values = shared | config.get(command, {})
-    return {k: resolve(v, known[k], base) for k, v in values.items()}
-
-
-def resolve(value, action: argparse.Action, base: Path):
-    if action.type is not Path:
-        return value
-    return [base / v for v in value] if isinstance(value, list) else base / value
+    if parser.get_default("people") is not None:
+        values["people"] = {k: config[k] for k in PEOPLE if k in config}
+    return values

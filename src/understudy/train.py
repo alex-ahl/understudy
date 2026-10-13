@@ -1,6 +1,6 @@
 """QLoRA fine-tune of one shared adapter across all personas.
 
-    understudy train --data data/ --out outputs/adapter
+    understudy train --data private/data/ --out private/outputs/adapter
 
 Needs CUDA (run under WSL2 on the training box). Writes the LoRA adapter only.
 """
@@ -20,8 +20,8 @@ RESPONSE_PART = "<|start_header_id|>assistant<|end_header_id|>\n\n"
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy train", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data", type=Path, default=Path("data"))
-    ap.add_argument("--out", type=Path, default=Path("outputs/adapter"))
+    ap.add_argument("--data", type=Path, default=Path("private/data"))
+    ap.add_argument("--out", type=Path, default=Path("private/outputs/adapter"))
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--max-seq-length", type=int, default=1024)
     # low rank on purpose: high rank mostly buys verbatim memorization

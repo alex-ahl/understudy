@@ -7,17 +7,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from understudy import cli, dataset, train
+from understudy import cli
 from understudy.config import ConfigError, check, defaults, load
 
-BASE = Path("/configs")
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def parsed(config, command, *argv):
-    module = cli.module(command)
-    parser = module.parser()
-    parser.set_defaults(**defaults(config, command, parser, BASE))
+    parser = cli.module(command).parser()
+    parser.set_defaults(**defaults(config, command, parser))
     return parser.parse_args(argv)
+
+
+def parsers():
+    return {name: cli.module(name).parser() for name in cli.COMMANDS}
 
 
 class Config(unittest.TestCase):
@@ -33,49 +36,54 @@ class Config(unittest.TestCase):
         self.assertTrue(parsed(config, "dataset").no_scrub)
         self.assertFalse(hasattr(parsed(config, "train"), "no_scrub"))
 
-    def test_relative_paths_resolve_against_the_config_directory(self):
-        args = parsed({"dataset": {"input": "exports", "out": "/abs/data", "aliases": "aliases.txt"}},
-                      "dataset")
-        self.assertEqual(args.input, BASE / "exports")
-        self.assertEqual(args.out, Path("/abs/data"))
-        self.assertEqual(args.aliases, BASE / "aliases.txt")
+    def test_paths_are_paths(self):
+        self.assertEqual(parsed({"dataset": {"input": "exports"}}, "dataset").input, Path("exports"))
 
     def test_lists_extend_with_the_command_line(self):
         args = parsed({"dataset": {"persona": ["bob"]}}, "dataset", "--persona", "alice")
         self.assertEqual(args.persona, ["bob", "alice"])
 
+    def test_people_tables_go_to_the_commands_that_read_them(self):
+        config = {"persona": {"bob": {"names": ["robert"]}}, "aliases": {"carl_xx": "carl"}}
+        self.assertEqual(parsed(config, "dataset").people, config)
+        self.assertEqual(parsed(config, "bot").people, config)
+        self.assertFalse(hasattr(parsed(config, "train"), "people"))
+
     def test_unknown_keys_and_sections_are_errors(self):
-        parsers = {"dataset": dataset.parser(), "train": train.parser()}
-        check({"seed": 1, "train": {"epochs": 3}}, parsers)
-        for bad in ({"train": {"epoch": 3}}, {"trian": {}}, {"no_such_option": 1}):
+        check({"seed": 1, "train": {"epochs": 3}, "persona": {"bob": {"names": ["robert"]}},
+               "aliases": {"carl_xx": "carl"}}, parsers())
+        for bad in ({"train": {"epoch": 3}}, {"trian": {}}, {"no_such_option": 1},
+                    {"persona": {"bob": {"name": ["robert"]}}}, {"persona": {"bob": {"names": "robert"}}},
+                    {"persona": {"bob": "robert"}}, {"aliases": {"carl_xx": 1}}):
             with self.subTest(bad), self.assertRaises(ConfigError):
-                check(bad, parsers)
+                check(bad, parsers())
 
 
 class ConfigFile(unittest.TestCase):
     def test_the_example_config_is_valid(self):
-        example = load(Path(__file__).resolve().parent.parent / "understudy.example.toml")
-        check(example, {name: cli.module(name).parser() for name in cli.COMMANDS})
+        check(load(ROOT / "understudy.example.toml"), parsers())
 
-
-    def test_dataset_runs_from_a_config_in_another_directory(self):
-        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cwd:
+    def test_dataset_runs_from_the_private_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
+            (tmp / "private").mkdir()
             (tmp / "export.json").write_text(json.dumps({"channel": {"name": "general"}, "messages": [
                 {"id": str(i), "type": "Default", "timestamp": f"2026-01-01T12:0{i}:00+00:00",
                  "author": {"id": a, "name": a, "isBot": False}, "content": text,
                  "attachments": [], "mentions": []}
                 for i, (a, text) in enumerate([("carol", "something to reply to"),
-                                               ("dave", "something else as well"),
+                                               ("robert", "something else as well"),
                                                ("bob", "bob has thoughts on it")])]}))
-            (tmp / "understudy.toml").write_text(
-                'seed = 0\n[dataset]\ninput = "export.json"\nout = "data"\n'
-                'persona = ["bob"]\nno_scrub = true\n')
-            proc = subprocess.run(
-                [sys.executable, "-m", "understudy", "--config", tmp / "understudy.toml", "dataset"],
-                capture_output=True, text=True, cwd=cwd)
+            (tmp / "private" / "understudy.toml").write_text(
+                '[persona.bob]\n[aliases]\nrobert = "pat"\n'
+                '[dataset]\ninput = "export.json"\nout = "data"\nno_scrub = true\n')
+            proc = subprocess.run([sys.executable, "-m", "understudy", "dataset"],
+                                  capture_output=True, text=True, cwd=tmp)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertTrue((tmp / "data" / "train.jsonl").exists())
+            rows = [json.loads(l) for name in ("train", "val") if (tmp / "data" / f"{name}.jsonl").exists()
+                    for l in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()]
+        [row] = rows
+        self.assertIn("pat: something else", row["messages"][1]["content"])
 
     def test_a_bad_config_stops_before_running(self):
         with tempfile.TemporaryDirectory() as tmp:

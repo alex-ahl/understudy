@@ -1,6 +1,6 @@
 """Token lengths of the dataset under the model's chat template.
 
-    understudy stats data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
+    understudy stats private/data/train.jsonl --model AI-Sweden-Models/Llama-3-8B-instruct
 
 Pick max_seq_length just above p95; longer examples get truncated in training.
 """
@@ -22,7 +22,7 @@ def percentile(sorted_vals: list[int], q: float) -> int:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy stats", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("data", type=Path, nargs="?", default=Path("data/train.jsonl"))
+    ap.add_argument("data", type=Path, nargs="?", default=Path("private/data/train.jsonl"))
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--max-seq-length", type=int, default=1024,
                     help="warn when p95 is above it (default 1024, as in train)")

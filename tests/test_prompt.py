@@ -1,21 +1,9 @@
-import tempfile
 import unittest
-from pathlib import Path
 
-from understudy.profiles import build_messages, read_profiles, system_prompt
+from understudy.prompt import build_messages, system_prompt
 
 
-class Profiles(unittest.TestCase):
-    def test_reads_blocks_and_skips_comments(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write("# header\n[Bob]\nTwo kids.  # aside\nPlays PUBG.\n\n[empty]\n[alice]\nTypo queen.\n")
-        profiles = read_profiles(Path(fh.name))
-        Path(fh.name).unlink()
-        self.assertEqual(profiles, {"bob": "Two kids.\nPlays PUBG.", "alice": "Typo queen."})
-
-    def test_missing_file_means_no_profiles(self):
-        self.assertEqual(read_profiles(Path("/nonexistent/profiles.txt")), {})
-
+class Prompt(unittest.TestCase):
     def test_system_prompt_names_the_persona_and_channel(self):
         self.assertEqual(system_prompt("Bob", "pubg"), "Reply as `Bob` in #pubg.")
 

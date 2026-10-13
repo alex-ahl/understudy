@@ -1,13 +1,5 @@
-# real messages from real people; never commit
-exports/
-data/
-outputs/
-aliases.txt
-profiles.txt
-bots.txt
-names.txt
-understudy.toml
-downweight.txt
+# real messages from real people, names, tokens; never commit
+private/
 
 .venv/
 __pycache__/

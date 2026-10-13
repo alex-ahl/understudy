@@ -20,7 +20,7 @@ BASE_HF = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy serve", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--adapter", type=Path, default=Path("outputs/adapter.gguf"))
+    ap.add_argument("--adapter", type=Path, default=Path("private/outputs/adapter.gguf"))
     ap.add_argument("--base-hf", default=BASE_HF, metavar="REPO", help="GGUF base on Hugging Face")
     ap.add_argument("--base-gguf", type=Path, metavar="FILE", help="local GGUF base; wins over --base-hf")
     ap.add_argument("--lora-scale", type=float, default=1.0)

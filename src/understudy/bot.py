@@ -2,10 +2,9 @@
 
     understudy bot
 
-Each persona is its own bot account; bots.txt holds one `persona=token` line
-per persona. aliases.txt, bots.txt, profiles.txt and data/voices.json (written
-by understudy dataset) are read from the working directory unless given as
-flags. A persona replies to the channel's recent conversation when someone
+Each persona with a `token` in its [persona.NAME] table is its own bot account.
+The voice lines come from private/data/voices.json, written by understudy
+dataset. A persona replies to the channel's recent conversation when someone
 @-mentions it or writes its name in a message.
 
 --llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
@@ -24,9 +23,10 @@ import re
 import urllib.request
 from pathlib import Path
 
-from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, build_aliases, clean,
-                                 display_name, fold, merge_bursts, read_aliases_file, render, unquote)
-from understudy.profiles import build_messages, read_profiles
+from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, clean, display_name,
+                                 merge_bursts, render)
+from understudy.people import fold, read as read_people
+from understudy.prompt import build_messages
 
 log = logging.getLogger("understudy")
 
@@ -34,28 +34,6 @@ HISTORY = 40        # raw messages; bursts and the gap cut bring it down to a co
 MAX_LINES = 5       # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
-
-
-def load_personas(aliases_path: Path) -> tuple[dict[str, str], list[str]]:
-    """Aliases as the dataset built them, and the personas by their pseudonyms."""
-    pairs, marked = read_aliases_file(aliases_path)
-    aliases = build_aliases(pairs)
-    personas = []
-    for name in marked:
-        real = fold(unquote(name.strip())[0])
-        personas.append(aliases.get(real) or aliases.get(f'"{real}"') or name.strip())
-    return aliases, personas
-
-
-def read_tokens(path: Path) -> dict[str, str]:
-    """persona=token lines, # comments; persona names compared folded."""
-    tokens = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if "=" in line:
-            persona, _, token = line.partition("=")
-            tokens[fold(persona.strip())] = token.strip()
-    return tokens
 
 
 def named_personas(text: str, personas: list[str]) -> list[str]:
@@ -80,11 +58,10 @@ def conversation(msgs: list[Msg]) -> list[str]:
     return [render(t) for t in reversed(kept)]
 
 
-def own_lines(persona: str, voices: dict[str, list[str]], profiles: dict[str, str]) -> list[str]:
+def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str]) -> list[str]:
     """Real one-liners, then the whole profile: the most of what training put in a context."""
     pool = voices.get(fold(persona), [])
-    profile = profiles.get(persona.lower(), "")
-    return [*random.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile.splitlines()]
+    return [*random.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile]
 
 
 def server_reply(url: str, messages: list[dict]) -> str:
@@ -122,15 +99,13 @@ def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy bot", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--aliases", type=Path, default=Path("aliases.txt"), metavar="FILE")
-    ap.add_argument("--tokens", type=Path, default=Path("bots.txt"), metavar="FILE")
-    ap.add_argument("--profiles", type=Path, default=Path("profiles.txt"), metavar="FILE")
-    ap.add_argument("--voices", type=Path, default=Path("data/voices.json"), metavar="FILE")
+    ap.add_argument("--voices", type=Path, default=Path("private/data/voices.json"), metavar="FILE")
     ap.add_argument("--llm-url", default=os.environ.get("LLM_URL", "http://localhost:8080"),
                     help="OpenAI-compatible server (default http://localhost:8080)")
     ap.add_argument("--channel", action="append", metavar="NAME",
                     default=[c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()],
                     help="channel to reply in; repeat for each (default: all)")
+    ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
 
@@ -138,12 +113,13 @@ def run(args: argparse.Namespace) -> int:
 
     import discord
 
-    aliases, all_personas = load_personas(args.aliases)
-    tokens = read_tokens(args.tokens)
-    personas = [p for p in all_personas if fold(p) in tokens]
+    people = read_people(args.people)
+    aliases = people.aliases
+    tokens = {p.name: p.token for p in people.personas if p.token}
+    profiles = {p.name: p.profile for p in people.personas}
+    personas = list(tokens)
     if not personas:
-        raise SystemExit(f"{args.tokens} has no token for any persona in {args.aliases}")
-    profiles_path = args.profiles
+        raise SystemExit('no persona has a token: add token = "..." to its [persona.NAME] table')
     voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
     llm_url = args.llm_url
     channels = set(args.channel)
@@ -178,9 +154,8 @@ def run(args: argparse.Namespace) -> int:
         async with locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
                 turns = await history(channel)
-                profiles = read_profiles(profiles_path)
                 messages = build_messages(persona, channel.name, turns[-CONTEXT_TURNS:],
-                                          own_lines(persona, voices, profiles))
+                                          own_lines(persona, voices, profiles[persona]))
                 raw = await asyncio.to_thread(server_reply, llm_url, messages)
             speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
             text = clean_reply(raw, persona, speakers)
@@ -216,7 +191,7 @@ def run(args: argparse.Namespace) -> int:
         await asyncio.sleep(delay)
         # one bad token or missing intent shouldn't take the other personas down with it
         try:
-            await client.start(tokens[fold(persona)])
+            await client.start(tokens[persona])
         except Exception as e:
             print(f"{persona} could not connect: {type(e).__name__}: {e}")
 

@@ -6,7 +6,7 @@ Two passes around aliasing (see dataset.clean):
     names     people the aliases missed, after aliasing, with the pseudonyms allowed
 
 Organisations are counted, not replaced: most are shops, games and brands people
-talk about. The ones that identify someone, like an employer, belong in aliases.txt.
+talk about. The ones that identify someone, like an employer, belong in [aliases].
 
 Models download on first use: sv_core_news_sm (spaCy) and gliner_multi_pii-v1.
 """
@@ -25,7 +25,7 @@ from presidio_analyzer.predefined_recognizers import (EmailRecognizer, GLiNERRec
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-from understudy.dataset import fold
+from understudy.people import fold
 
 LANGUAGE = "sv"
 SPACY_MODEL = "sv_core_news_sm"

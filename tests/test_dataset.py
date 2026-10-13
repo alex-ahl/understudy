@@ -8,10 +8,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from understudy.dataset import (VOICE_EXAMPLES, Example, cap, downweight, has_link, own_lines,
-                                read_patterns, voice_pool)
+from understudy.dataset import (VOICE_EXAMPLES, Example, any_of, cap, downweight, has_link, own_lines,
+                                voice_pool)
 
-# run from a temp dir: dataset picks up aliases.txt / profiles.txt from the working directory.
+# run from a temp dir: the config is read from private/ under the working directory.
 # --no-scrub: scrubbing loads its models per run; test_scrub covers it
 DATASET = [sys.executable, "-m", "understudy", "dataset"]
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -30,9 +30,12 @@ def msg(i, author, content, at, **extra):
     }
 
 
-def run(messages, *flags):
+def run(messages, *flags, config=None):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        if config:
+            (tmp / "private").mkdir()
+            (tmp / "private" / "understudy.toml").write_text(config)
         (tmp / "export.json").write_text(json.dumps(
             {"channel": {"name": "general"}, "messages": messages}))
         proc = subprocess.run(
@@ -103,49 +106,43 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob", "--alias", "dave=pat")
         self.assertIn("@pat you said you'd be here", by_target(rows))
 
-    def test_aliases_file(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write("# real=fake\ndave = pat\n\nDavid=pat  # full name too\n")
+    def test_aliases_table(self):
         _, rows = run([
             msg(1, "carol", "anyone seen david lately", 0 * M),
             msg(2, "dave", "im right here obviously", 1 * M),
             msg(3, "bob", "dave and david are the same guy", 2 * M),
-        ], "--persona", "bob", "--aliases", fh.name)
-        Path(fh.name).unlink()
+        ], "--persona", "bob", config='[aliases]\ndave = "pat"\nDavid = "pat"  # full name too\n')
         [(target, ctx)] = by_target(rows).items()
         self.assertEqual(target, "pat and pat are the same guy")
         self.assertEqual(ctx, "carol: anyone seen pat lately\npat: im right here obviously")
 
     def test_alias_ignores_accents_and_stray_marks(self):
         _, rows = run([
-            msg(1, "carol", "has anyone seen rené", 0 * M),
-            msg(2, "Rêne", "re´ne is here, RENE is fine", 1 * M),
-            msg(3, "bob", "rene, renes and lorene", 2 * M),
-        ], "--persona", "bob", "--alias", "rene=pat")
+            msg(1, "carol", "has anyone seen chloé", 0 * M),
+            msg(2, "Chloë", "chlo´e is here, CHLOE is fine", 1 * M),
+            msg(3, "bob", "chloe, and chloes bike too", 2 * M),
+        ], "--persona", "bob", "--alias", "chloe=pat")
         [(target, ctx)] = by_target(rows).items()
-        self.assertEqual(target, "pat, pat and pat")
+        self.assertEqual(target, "pat, and pat bike too")
         self.assertEqual(ctx, "carol: has anyone seen pat\npat: pat is here, pat is fine")
 
-    def test_aliases_file_marks_personas(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write("*robert = bob\n*carol\ndave=pat\n")
+    def test_persona_tables_are_the_personas(self):
         _, rows = run([
             msg(1, "robert", "robert opens the chat", 0 * M),
             msg(2, "dave", "dave chimes in here", 1 * M),
             msg(3, "carol", "carol answers them both", 2 * M),
             msg(4, "robert", "robert closes the chat", 3 * M),
-        ], "--aliases", fh.name)
-        Path(fh.name).unlink()
+        ], config='[persona.bob]\nnames = ["robert"]\n[persona.carol]\n[aliases]\ndave = "pat"\n')
         systems = sorted(r["messages"][0]["content"] for r in rows)
         self.assertEqual(systems, ["Reply as `bob` in #general.", "Reply as `carol` in #general."])
 
-    def test_long_alias_replaces_any_word_containing_it(self):
+    def test_alias_keeps_the_possessive_but_not_longer_words(self):
         _, rows = run([
             msg(1, "carol", "where is everyone", 0 * M),
             msg(2, "dave", "no clue at all", 1 * M),
             msg(3, "bob", "roberts car, bigrobert and per", 2 * M),
         ], "--persona", "bob", "--alias", "robert=pat", "--alias", "per=kim")
-        self.assertIn("pat car, pat and kim", by_target(rows))
+        self.assertIn("pat car, bigrobert and kim", by_target(rows))
 
     def test_longer_alias_wins_regardless_of_order(self):
         _, rows = run([
@@ -155,26 +152,20 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob", "--alias", "robert=pat", "--alias", "roberta=kim")
         self.assertIn("pat and kim both came", by_target(rows))
 
-    def test_quoted_alias_matches_whole_words_only(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write('"acme"=[workplace]\n')
+    def test_alias_matches_whole_words_only(self):
         _, rows = run([
             msg(1, "carol", "where is everyone", 0 * M),
             msg(2, "dave", "no clue at all", 1 * M),
             msg(3, "bob", "Acme and Acmes office, not acmeville", 2 * M),
-        ], "--persona", "bob", "--aliases", fh.name)
-        Path(fh.name).unlink()
+        ], "--persona", "bob", "--alias", "acme=[workplace]")
         self.assertIn("[workplace] and [workplace] office, not acmeville", by_target(rows))
 
     def test_profiles_go_into_the_context_not_the_system_prompt(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write("[bob]\nAlways hungry.\n")
         _, rows = run([
             msg(1, "carol", "where is everyone", 0 * M),
             msg(2, "dave", "no clue at all", 1 * M),
             msg(3, "bob", "probably getting food again", 2 * M),
-        ], "--persona", "bob", "--profiles", fh.name)
-        Path(fh.name).unlink()
+        ], config='[persona.bob]\nprofile = ["Always hungry."]\n')
         [row] = rows
         self.assertEqual(row["messages"][0]["content"], "Reply as `bob` in #general.")
         own = [l for l in row["messages"][1]["content"].splitlines() if l.startswith("bob: ")]
@@ -241,14 +232,12 @@ class Shaping(unittest.TestCase):
             self.assertTrue(has_link(text), text)
         self.assertFalse(has_link("no links [place] here"))
 
-    def test_patterns_file_skips_comments_and_blanks(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-            fh.write("# plans\ntonight\n\n\\bmeet up\\b\n")
-        pattern = read_patterns(Path(fh.name))
-        Path(fh.name).unlink()
+    def test_downweight_patterns_match_any_ignoring_case(self):
+        pattern = any_of(["tonight", r"\bmeet up\b"])
         self.assertTrue(pattern.search("Shall we MEET UP?"))
         self.assertTrue(pattern.search("tonight then"))
         self.assertFalse(pattern.search("plans"))
+        self.assertIsNone(any_of([]))
 
     def test_downweight_drops_matches_but_never_the_line_replied_to(self):
         pattern = re.compile("tonight")

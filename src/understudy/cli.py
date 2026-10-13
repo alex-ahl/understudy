@@ -1,6 +1,6 @@
 """understudy [--config FILE] <command> [args]: each command takes its module's own flags (-h).
 
-Settings come from FILE, or ./understudy.toml if it exists (see config.py).
+People and settings come from FILE, or private/understudy.toml if it exists (see config.py).
 """
 
 from __future__ import annotations
@@ -76,12 +76,11 @@ def main(argv: list[str] | None = None) -> int:
         except cfg.ConfigError as e:
             print(e, file=sys.stderr)
             return 2
-    base = path.resolve().parent if path else Path.cwd()
 
     def run(command: str, args: list[str]) -> int:
         mod = module(command)
         parser = mod.parser()
-        parser.set_defaults(**cfg.defaults(config, command, parser, base))
+        parser.set_defaults(**cfg.defaults(config, command, parser))
         return mod.run(parser.parse_args(args))
 
     if name == "pipeline":

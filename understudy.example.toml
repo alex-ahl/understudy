@@ -86,8 +86,6 @@ downweight = [
   '\b\d{1,2}:\d{2}\b',      # clock times
 ]
 no_scrub = false            # true keeps links, emails, numbers, places and unknown names verbatim
-keep_bots = false           # true keeps messages written by bots
-keep_attachment_targets = false  # true trains on replies that came with an image
 
 [stats]                     # understudy stats: token lengths of the training data
 data = "private/data/train.jsonl"

@@ -105,7 +105,7 @@ def clean(content: str, mentions: list[dict], aliases: dict[str, str],
     return content.strip()
 
 
-def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None, drop_bots: bool):
+def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None):
     msgs: list[Msg] = []
     skipped = Counter()
 
@@ -119,7 +119,7 @@ def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None, 
                 continue
 
             author = m.get("author") or {}
-            if drop_bots and author.get("isBot"):
+            if author.get("isBot"):
                 skipped["bot"] += 1
                 continue
 
@@ -169,7 +169,7 @@ def render(turn: Turn) -> str:
 
 
 def build_examples(turns: list[Turn], personas: set[str], channel: str,
-                   by_id: dict[str, Msg], keep_attachment_targets: bool) -> list[Example]:
+                   by_id: dict[str, Msg]) -> list[Example]:
     examples = []
 
     for i, turn in enumerate(turns):
@@ -177,7 +177,7 @@ def build_examples(turns: list[Turn], personas: set[str], channel: str,
             continue
         if len(turn.content) < MIN_TARGET_CHARS:
             continue
-        if turn.had_attachment and not keep_attachment_targets:
+        if turn.had_attachment:
             continue  # the message meant something only alongside its image
 
         # walk back until the conversation breaks
@@ -282,8 +282,6 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-per-persona", type=int, metavar="N", help="sample each persona down to N examples")
     ap.add_argument("--no-scrub", action="store_true",
                     help="keep links, emails, phone numbers, addresses, towns, passwords and names verbatim")
-    ap.add_argument("--keep-bots", action="store_true")
-    ap.add_argument("--keep-attachment-targets", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
@@ -311,7 +309,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_scrub:
         from understudy.scrub import Scrubber  # loads Presidio, spaCy and GLiNER
         scrubber = Scrubber(allow={fold(fake) for fake in aliases.values()} | personas)
-    msgs, skipped = load(paths, aliases, scrubber, not args.keep_bots)
+    msgs, skipped = load(paths, aliases, scrubber)
     if not msgs:
         print("nothing survived loading", file=sys.stderr)
         return 1
@@ -326,7 +324,7 @@ def run(args: argparse.Namespace) -> int:
     for channel, channel_msgs in by_channel.items():
         channel_msgs.sort(key=lambda m: m.ts)
         turns = merge_bursts(channel_msgs)
-        examples += build_examples(turns, personas, channel, by_id, args.keep_attachment_targets)
+        examples += build_examples(turns, personas, channel, by_id)
 
     if not examples:
         seen = Counter(m.author for m in msgs).most_common(15)

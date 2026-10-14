@@ -1,5 +1,6 @@
 # understudy
 
+[![Docker](https://img.shields.io/badge/runs%20in-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Llama 3](https://img.shields.io/badge/base-Llama%203%208B-0467DF?logo=meta&logoColor=white)](https://huggingface.co/AI-Sweden-Models/Llama-3-8B-instruct)
 [![QLoRA with Unsloth](https://img.shields.io/badge/QLoRA-Unsloth-8A2BE2)](https://github.com/unslothai/unsloth)
@@ -26,8 +27,8 @@ Discord export ──► dataset ──► LoRA fine-tune ──► llama-server
   private lives in one gitignored folder.
 - **One settings file.** People, profiles, bot tokens and every command's
   settings live in `private/understudy.toml`.
-- **Runs where you have the hardware.** Train on an NVIDIA GPU (WSL2 works),
-  serve anywhere llama.cpp runs.
+- **Runs in Docker.** Two images, CPU and CUDA, with every dependency pinned or
+  bundled. Train on an NVIDIA GPU (WSL2 works); everything else runs anywhere.
 
 ## Before you start
 
@@ -37,23 +38,26 @@ Discord export ──► dataset ──► LoRA fine-tune ──► llama-server
 
 ## Requirements
 
-| Stage | Needs |
+| For | Needs |
 |---|---|
-| dataset | Python 3.11+, `pip install -e '.[dataset]'`, ~1 GB of models on first run |
-| train | NVIDIA GPU, CUDA build of PyTorch, `pip install -e '.[train]'` |
-| convert, serve | a llama.cpp checkout and `llama-server` |
-| bot | `pip install -e '.[bot]'`, a Discord bot account per persona |
+| everything | Docker with Compose |
+| train, and serving on a GPU | an NVIDIA GPU and driver; Docker GPU support: the NVIDIA Container Toolkit on Linux, Docker Desktop's WSL2 backend on Windows |
+| the bots | a Discord bot account per persona |
 
 ## Quick start
 
 ```sh
-python3 -m venv .venv && source .venv/bin/activate
 mkdir -p private && cp understudy.example.toml private/understudy.toml
 # edit private/understudy.toml, export the server into private/exports/ (step 1)
-understudy pipeline          # dataset -> stats -> train -> convert
-understudy serve             # in one terminal
-understudy bot               # in another
+docker compose --profile tools build cpu           # gpu too, on the training machine
+docker compose run --rm cpu pipeline --to stats    # dataset, then token lengths
+docker compose run --rm gpu pipeline --from train  # train, then convert
+docker compose up -d serve bot                     # serve-cpu instead of serve without a GPU
 ```
+
+Every command is `docker compose run --rm cpu <command>` on the CPU image or
+`... gpu <command>` on the CUDA image, with `private/` mounted in place.
+Downloaded models are kept in the `cache` volume.
 
 ## Settings
 
@@ -98,9 +102,10 @@ epochs = 3
 ## 2. Build the dataset
 
 ```sh
-pip install -e '.[dataset]'
-understudy dataset              # private/exports/ -> private/data/
+docker compose run --rm cpu dataset      # private/exports/ -> private/data/
 ```
+
+The scrubbing models download into the `cache` volume on the first run (about 1 GB).
 
 ### Renaming
 
@@ -145,21 +150,14 @@ don't scrub.
 
 ## 3. Train
 
-Set up the training box:
+On the GPU machine, `nvidia-smi` must work, and Docker must see the GPU: the
+NVIDIA Container Toolkit on Linux, Docker Desktop's WSL2 backend on Windows.
+Under WSL2, keep the repo under `~/`, not `/mnt/c/`.
 
 ```sh
-nvidia-smi                      # must work; under WSL2, do not install a driver inside WSL
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python 3.11 && source .venv/bin/activate
-uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-uv pip install -e '.[train]'
-```
-
-Under WSL2, keep the repo and data under `~/`, not `/mnt/c/`.
-
-```sh
-understudy stats                          # token lengths of private/data/train.jsonl
-understudy train --max-seq-length 1024    # just above p95
+docker compose --profile tools build gpu
+docker compose run --rm cpu stats                     # token lengths of private/data/train.jsonl
+docker compose run --rm gpu train --max-seq-length 1024   # just above p95
 ```
 
 `stats` warns when p95 is above `--max-seq-length`. The adapter lands in
@@ -169,18 +167,15 @@ masking in `understudy train` assumes the Llama 3 chat format.
 ## 4. Serve
 
 ```sh
-brew install llama.cpp          # or build it; llama-server must be on PATH
-git clone --depth 1 https://github.com/ggml-org/llama.cpp ../llama.cpp
-pip install -e .
-pip install -r ../llama.cpp/requirements/requirements-convert_lora_to_gguf.txt
-
-understudy convert --llama-cpp ../llama.cpp   # -> private/outputs/adapter.gguf
-understudy serve                              # downloads the base model on first run, serves on :8080
+docker compose run --rm cpu convert      # -> private/outputs/adapter.gguf
+docker compose up -d serve               # on an NVIDIA GPU; serve-cpu without one
 ```
 
-`--base-gguf FILE` serves a local base model. `--lora-scale` above 1.0
-exaggerates the personas; `--context` and `--port` set llama-server's `-c` and
-`--port`.
+The model server listens on `127.0.0.1:8080` and downloads the base model into
+the `cache` volume on the first run. `base_gguf` serves a local base model
+instead. `lora_scale` above 1.0 exaggerates the personas; `context` sets
+llama-server's context size. On a Mac, `serve-cpu` runs without the GPU, so
+replies take a few times longer.
 
 ## 5. Discord bots
 
@@ -193,17 +188,16 @@ Each persona is its own bot account, running next to `llama-server`.
    `View Channels`, `Read Message History`, `Send Messages`. Open the URL and add
    the bot to the server.
 3. Put each token in its persona's table: `token = "..."`.
-4. Start them:
+4. Start them, with `serve` running:
 
    ```sh
-   pip install -e '.[bot]'
-   understudy bot
+   docker compose up -d bot
+   docker compose logs -f bot
    ```
 
 A persona replies to the channel's recent conversation when someone @-mentions
-it or writes its name. `--channel NAME`, repeatable, limits where; `--llm-url`
-points at another server. They default to the `CHANNELS` (comma-separated) and
-`LLM_URL` environment variables.
+it or writes its name. `channel` limits where. In compose the bots reach the
+model server as `http://llm:8080`; `llm_url` points them at another one.
 
 ### Conversations among the personas
 
@@ -221,19 +215,21 @@ conversation. Needs two or more personas with a token.
 ## Pipeline
 
 ```sh
-understudy pipeline                         # dataset -> stats -> train -> convert
-understudy pipeline --to train              # stop after training
-understudy pipeline --from convert          # start from an existing adapter
+docker compose run --rm cpu pipeline --to stats     # dataset -> stats
+docker compose run --rm gpu pipeline --from train   # train -> convert
 ```
 
-Each stage runs with the settings file's values and stops the pipeline when it
-fails. Stages run wherever their requirements are installed; copy
-`private/data/` or `private/outputs/` between machines to split the pipeline
-across them. `serve` and `bot` run until stopped and are started separately.
+`pipeline` runs dataset → stats → train → convert, or a range of them with
+`--from` and `--to`, and stops at the first stage that fails. The CPU image has
+no training libraries and the CUDA image no scrubbing models, so the pipeline
+splits between them; on two machines, copy `private/data/` or
+`private/outputs/` across.
 
 ## Development
 
 ```sh
-pip install -e '.[dataset]'
-python -m unittest discover -s tests
+docker compose --profile tools build cpu
+docker compose run --rm -v .:/work --entrypoint python cpu -m unittest discover -s tests
 ```
+
+Mounting the repo runs the tests on the working tree.

@@ -33,7 +33,9 @@ def secrets() -> tuple[set[str], set[str]]:
 
 
 def tracked() -> list[Path]:
-    out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True)
+    # safe.directory: in a container the mounted repo belongs to another user, and git refuses it
+    out = subprocess.run(["git", "-c", "safe.directory=*", "ls-files", "-z"], cwd=ROOT,
+                         capture_output=True, text=True)
     return [ROOT / p for p in out.stdout.split("\0") if p] if out.returncode == 0 else []
 
 

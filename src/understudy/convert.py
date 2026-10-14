@@ -1,10 +1,10 @@
 """The trained adapter as a GGUF file for llama-server.
 
-    understudy convert --llama-cpp ../llama.cpp
+    understudy convert
 
-Runs llama.cpp's convert_lora_to_gguf.py with this Python, so its requirements
-(requirements/requirements-convert_lora_to_gguf.txt) go in this environment.
-Downloads the base model's config on the first run.
+Runs llama.cpp's convert_lora_to_gguf.py, which the Docker images carry in
+/app with its requirements in the system Python. Downloads the base model's
+config on the first run.
 """
 
 from __future__ import annotations
@@ -16,6 +16,11 @@ from pathlib import Path
 
 from understudy.train import MODEL
 
+# where llama.cpp's images put the converter; its requirements live in the system
+# Python, apart from understudy's own environment, whose transformers is newer
+CONVERTER = Path("/app/convert_lora_to_gguf.py")
+PYTHON = "/usr/bin/python3"
+
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="understudy convert", description=__doc__,
@@ -23,23 +28,17 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--adapter", type=Path, default=Path("private/outputs/adapter"))
     ap.add_argument("--out", type=Path, default=Path("private/outputs/adapter.gguf"))
     ap.add_argument("--model", default=MODEL, help="the base the adapter was trained on")
-    ap.add_argument("--llama-cpp", type=Path, default=Path("../llama.cpp"), metavar="DIR",
-                    help="a llama.cpp checkout (default ../llama.cpp)")
     return ap
 
 
-def script(args: argparse.Namespace) -> Path:
-    return args.llama_cpp / "convert_lora_to_gguf.py"
-
-
 def command(args: argparse.Namespace) -> list[str]:
-    return [sys.executable, str(script(args)), str(args.adapter),
-            "--base-model-id", args.model, "--outfile", str(args.out)]
+    return [PYTHON, str(CONVERTER), str(args.adapter), "--base-model-id", args.model,
+            "--outfile", str(args.out)]
 
 
 def run(args: argparse.Namespace) -> int:
-    if not script(args).exists():
-        print(f"no {script(args)}; point --llama-cpp at a llama.cpp checkout", file=sys.stderr)
+    if not CONVERTER.exists():
+        print(f"no {CONVERTER}; run this in the Docker image (see the README)", file=sys.stderr)
         return 1
     if not args.adapter.is_dir():
         print(f"no adapter at {args.adapter}; run understudy train first", file=sys.stderr)

@@ -101,7 +101,6 @@ grad_accum = 16             # examples per optimiser step
 [convert]                   # understudy convert: adapter -> GGUF for llama-server
 adapter = "private/outputs/adapter"
 out = "private/outputs/adapter.gguf"
-llama_cpp = "../llama.cpp"  # a llama.cpp checkout, for its convert_lora_to_gguf.py
 
 [serve]                     # understudy serve: llama-server with the adapter
 adapter = "private/outputs/adapter.gguf"
@@ -110,11 +109,11 @@ base_hf = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"  # downloaded on fi
 lora_scale = 1.0            # above 1.0 exaggerates the personas; gibberish somewhere past 2
 context = 4096              # llama-server's context size in tokens
 port = 8080
-llama_server = "llama-server"  # the binary, if it isn't on PATH
+host = "0.0.0.0"            # address to listen on; compose publishes the port on localhost only
 
 [bot]                       # understudy bot: one Discord bot per persona with a token
 voices = "private/data/voices.json"   # written by understudy dataset
-llm_url = "http://localhost:8080"     # any OpenAI-compatible server
+# llm_url = "http://localhost:8080"   # any OpenAI-compatible server; compose sets it to its serve service
 channel = []                # channel names to reply in; empty means all
 converse_every = 0          # minutes between conversations among the personas; 0 means none
 converse_length = 20        # messages per conversation

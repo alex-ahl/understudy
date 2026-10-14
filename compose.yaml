@@ -1,0 +1,77 @@
+# Every service runs the understudy CLI from the repo root, with private/ mounted
+# in place and downloaded models kept in the `cache` volume.
+#
+#   docker compose --profile tools build cpu   build an image (cpu or gpu)
+#   docker compose run --rm cpu dataset        any command, on the CPU image
+#   docker compose run --rm gpu train          any command, on the CUDA image
+#   docker compose up -d serve bot             model server and bots, on a GPU
+#   docker compose up -d serve-cpu bot         the same without one
+
+x-cpu: &cpu
+  image: understudy:cpu
+  build:
+    context: .
+  volumes:
+    - ./private:/work/private
+    - cache:/cache
+
+x-gpu: &gpu
+  image: understudy:cuda
+  build:
+    context: .
+    args:
+      BASE: ghcr.io/ggml-org/llama.cpp:full-cuda
+      EXTRAS: train,bot
+      TORCH_INDEX: https://download.pytorch.org/whl/cu124
+      PIN: "false"
+  volumes:
+    - ./private:/work/private
+    - cache:/cache
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  cpu:
+    <<: *cpu
+    profiles: [tools]
+
+  gpu:
+    <<: *gpu
+    profiles: [tools]
+
+  serve:
+    <<: *gpu
+    profiles: [gpu]
+    command: serve
+    ports:
+      - 127.0.0.1:8080:8080
+    networks:
+      default:
+        aliases: [llm]
+    restart: unless-stopped
+
+  serve-cpu:
+    <<: *cpu
+    profiles: [cpu]
+    command: serve
+    ports:
+      - 127.0.0.1:8080:8080
+    networks:
+      default:
+        aliases: [llm]
+    restart: unless-stopped
+
+  bot:
+    <<: *cpu
+    command: bot
+    environment:
+      LLM_URL: http://llm:8080
+    restart: unless-stopped
+
+volumes:
+  cache:

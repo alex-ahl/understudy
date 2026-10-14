@@ -1,5 +1,12 @@
 # understudy
 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Llama 3](https://img.shields.io/badge/base-Llama%203%208B-0467DF?logo=meta&logoColor=white)](https://huggingface.co/AI-Sweden-Models/Llama-3-8B-instruct)
+[![QLoRA with Unsloth](https://img.shields.io/badge/QLoRA-Unsloth-8A2BE2)](https://github.com/unslothai/unsloth)
+[![llama.cpp](https://img.shields.io/badge/serve-llama.cpp-000000)](https://github.com/ggml-org/llama.cpp)
+[![discord.py](https://img.shields.io/badge/bots-discord.py-5865F2?logo=discord&logoColor=white)](https://github.com/Rapptz/discord.py)
+[![Presidio](https://img.shields.io/badge/PII-Presidio%20%2B%20GLiNER-0078D4)](https://github.com/microsoft/presidio)
+
 **Your Discord friends, as bots that talk like them.**
 
 understudy fine-tunes one small LoRA adapter on a server's chat history and runs

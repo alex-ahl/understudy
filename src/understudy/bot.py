@@ -26,7 +26,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, clean, display_name,
+from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, any_of, clean, display_name,
                                  merge_bursts, render)
 from understudy.people import fold, read as read_people
 from understudy.prompt import build_messages
@@ -37,6 +37,7 @@ HISTORY = 40        # raw messages; bursts and the gap cut bring it down to a co
 MAX_LINES = 5       # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
+REROLLS = 2         # extra tries for a reply that matches --downweight
 
 
 def named_personas(text: str, personas: list[str]) -> list[str]:
@@ -128,6 +129,8 @@ def parser() -> argparse.ArgumentParser:
                     help="start a conversation among the personas this often (default 0: never)")
     ap.add_argument("--converse-length", type=int, default=20, metavar="N", help="messages per conversation")
     ap.add_argument("--converse-channel", metavar="NAME", help="channel the conversations happen in")
+    ap.add_argument("--downweight", action="append", default=[], metavar="REGEX",
+                    help=f"a matching reply is generated again, up to {REROLLS} times, then dropped")
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
@@ -146,6 +149,7 @@ def run(args: argparse.Namespace) -> int:
     voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
     llm_url = args.llm_url
     channels = set(args.channel)
+    avoid = any_of(args.downweight)
     if args.converse_every and not args.converse_channel:
         raise SystemExit("--converse-every needs --converse-channel")
     if args.converse_every and len(personas) < 2:
@@ -163,9 +167,9 @@ def run(args: argparse.Namespace) -> int:
         return display_name({"name": user.name, "nickname": getattr(user, "global_name", None) or user.name},
                             aliases)
 
-    async def history(channel) -> list[str]:
+    async def history(channel, since: datetime | None = None) -> list[str]:
         msgs = []
-        async for m in channel.history(limit=HISTORY):
+        async for m in channel.history(limit=HISTORY, after=since, oldest_first=False):
             if m.author.bot and m.author.id not in persona_of:
                 continue  # other bots, like the training data
             mentions = [{"id": str(u.id), "name": u.name,
@@ -178,14 +182,21 @@ def run(args: argparse.Namespace) -> int:
                             channel=channel.name, reply_to=None, had_attachment=bool(m.attachments)))
         return conversation(list(reversed(msgs)))
 
-    async def speak(channel, persona: str, prefill: str = "") -> str:
+    async def speak(channel, persona: str, prefill: str = "", since: datetime | None = None) -> str:
         async with locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
-                turns = await history(channel)
+                turns = await history(channel, since)
                 messages = build_messages(persona, channel.name, turns[-CONTEXT_TURNS:],
                                           own_lines(persona, voices, profiles[persona]))
-                raw = await asyncio.to_thread(server_reply, llm_url, messages, prefill)
-            speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
+                speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
+                for _ in range(1 + REROLLS):
+                    raw = await asyncio.to_thread(server_reply, llm_url, messages, prefill)
+                    # matched on the raw reply: cleanup removes some of what the patterns look for
+                    if not (avoid and avoid.search(raw)):
+                        break
+                    log.info("%s's reply matched --downweight, generating again", persona)
+                else:
+                    return ""
             text = clean_reply(raw, persona, speakers)
             if text:
                 await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
@@ -201,7 +212,8 @@ def run(args: argparse.Namespace) -> int:
             if last_person.get(channel_id, started) > started:
                 log.info("conversation stops: a person wrote")
                 return
-            text = await speak(clients[persona].get_channel(channel_id), persona, prefill)
+            # only what was said since it started: each conversation begins blank
+            text = await speak(clients[persona].get_channel(channel_id), persona, prefill, started)
             if not text:
                 log.info("conversation stops: %s had nothing to say", persona)
                 return
@@ -211,18 +223,20 @@ def run(args: argparse.Namespace) -> int:
 
     async def converse_every(minutes: float, name: str) -> None:
         first = clients[personas[0]]
-        await asyncio.gather(*(c.wait_until_ready() for c in clients.values()))
+        # wait_until_ready() raises before a client has logged in, and the logins are staggered
+        while not all(c.is_ready() for c in clients.values()):
+            await asyncio.sleep(1)
         channel = discord.utils.get(first.get_all_channels(), name=name, type=discord.ChannelType.text)
         if channel is None:
             print(f"no text channel named {name}; no conversations")
             return
         while True:
-            await asyncio.sleep(minutes * 60)
             # runs under gather with the bots: an error escaping here would stop all of them
             try:
                 await converse(channel.id)
             except Exception:
                 log.exception("conversation failed")
+            await asyncio.sleep(minutes * 60)
 
     def wire(persona: str, client) -> None:
         @client.event

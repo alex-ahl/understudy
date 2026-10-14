@@ -19,6 +19,17 @@ max_seq_length = 1024       # tokens per example: stats warns when p95 is above 
                             # train truncates longer ones. Set it just above p95.
 seed = 0                    # dataset shuffling and sampling, train initialisation
 
+# Example; default none. Replies matching any of these case-insensitive regexes
+# are kept at 20%, and so are matching lines in the conversation before a reply,
+# except the line being replied to; the bots generate a matching reply again.
+# Use it for topics the model drifts into, or placeholders like '\[(name|place)\]'.
+# Single quotes keep backslashes literal.
+downweight = [
+  '\b(tonight|this weekend|tomorrow)\b',
+  '\b(meet up|hang out|grab a beer)\b',
+  '\b\d{1,2}:\d{2}\b',      # clock times
+]
+
 
 # ------------------------------------------------------------------ people
 
@@ -76,15 +87,6 @@ persona = []                # extra personas by name, on top of [persona.*]
 alias = []                  # extra renames as "REAL=FAKE", on top of [aliases]
 max_per_persona = 1000      # example; default no cap. Samples larger personas down to
                             # this many examples, so the big talkers don't drown out the rest.
-# Example; default none. Replies matching any of these case-insensitive regexes
-# are kept at 20%, and so are matching lines in the conversation before a reply,
-# except the line being replied to. Use it for topics the model drifts into.
-# Single quotes keep backslashes literal.
-downweight = [
-  '\b(tonight|this weekend|tomorrow)\b',
-  '\b(meet up|hang out|grab a beer)\b',
-  '\b\d{1,2}:\d{2}\b',      # clock times
-]
 no_scrub = false            # true keeps links, emails, numbers, places and unknown names verbatim
 
 [stats]                     # understudy stats: token lengths of the training data

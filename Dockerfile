@@ -15,7 +15,8 @@ ARG SPACY_MODEL=https://github.com/explosion/spacy-models/releases/download/sv_c
 # ------------------------------------------------------------ pip images
 
 FROM python:3.12-slim AS python
-ENV HF_HOME=/cache/huggingface PIP_DISABLE_PIP_VERSION_CHECK=1
+# unbuffered: progress shows as it happens, not when a buffer happens to fill
+ENV HF_HOME=/cache/huggingface PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONUNBUFFERED=1
 WORKDIR /work
 COPY pyproject.toml README.md ./
 COPY src src
@@ -52,7 +53,8 @@ FROM ${LLAMA_CPP}:server AS serve
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=code /understudy /opt/understudy/understudy
-ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH
+# llama-server's shared libraries sit next to it in /app
+ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH LD_LIBRARY_PATH=/app
 WORKDIR /work
 ENTRYPOINT ["python3", "-m", "understudy"]
 
@@ -60,6 +62,7 @@ FROM ${LLAMA_CPP}:server-cuda AS serve-cuda
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=code /understudy /opt/understudy/understudy
-ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH
+# llama-server's shared libraries sit next to it in /app
+ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH LD_LIBRARY_PATH=/app
 WORKDIR /work
 ENTRYPOINT ["python3", "-m", "understudy"]

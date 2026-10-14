@@ -2,7 +2,7 @@
 # in place and downloaded models kept in the `cache` volume. Images are built per
 # job (see the Dockerfile), so a machine builds only the ones it runs.
 #
-#   docker compose --profile tools build cpu   build an image: cpu, gpu or convert
+#   docker compose --profile tools build cpu   build an image: any service below
 #   docker compose run --rm cpu dataset        dataset, stats, any other CPU command
 #   docker compose run --rm gpu train          training, on an NVIDIA GPU
 #   docker compose run --rm convert            adapter -> GGUF
@@ -56,13 +56,13 @@ services:
     <<: [*app, *nvidia, *llm]
     image: understudy:serve-cuda
     build: {context: ., target: serve-cuda}
-    profiles: [gpu]
+    profiles: [gpu, tools]
 
   serve-cpu:
     <<: [*app, *llm]
     image: understudy:serve
     build: {context: ., target: serve}
-    profiles: [cpu]
+    profiles: [cpu, tools]
 
   bot:
     <<: *app

@@ -1,7 +1,8 @@
+import random
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from understudy.bot import clean_reply, conversation, named_personas, own_lines
+from understudy.bot import clean_reply, conversation, named_personas, next_speaker, own_lines, with_prefill
 from understudy.dataset import Msg
 
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -33,6 +34,18 @@ class Bot(unittest.TestCase):
         self.assertEqual(lines[3:], ["Likes trains.", "Hates Mondays."])
         self.assertLessEqual(set(lines[:3]), set(voices["bob"]))
         self.assertEqual(own_lines("carol", voices, []), [])
+
+    def test_next_speaker_is_whoever_was_named_else_someone_else(self):
+        personas = ["bob", "alice", "carol"]
+        self.assertEqual(next_speaker("what do you say, carol?", "bob", personas, random.Random(0)), "carol")
+        self.assertIn(next_speaker("bob here again", "bob", personas, random.Random(0)), ("alice", "carol"))
+        picks = {next_speaker("nobody named", "bob", personas, random.Random(seed)) for seed in range(20)}
+        self.assertEqual(picks, {"alice", "carol"})
+
+    def test_prefill_is_kept_once(self):
+        self.assertEqual(with_prefill("@alice have you seen it", "@alice "), "@alice have you seen it")
+        self.assertEqual(with_prefill("have you seen it", "@alice "), "@alice have you seen it")
+        self.assertEqual(with_prefill("plain reply", ""), "plain reply")
 
     def test_reply_keeps_only_the_personas_own_clean_lines(self):
         raw = "bob: sure thing\ncheck [link example.com] out\nsure thing\nalice: no way"

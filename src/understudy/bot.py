@@ -5,7 +5,9 @@
 Each persona with a `token` in its [persona.NAME] table is its own bot account.
 The voice lines come from private/data/voices.json, written by understudy
 dataset. A persona replies to the channel's recent conversation when someone
-@-mentions it or writes its name in a message.
+@-mentions it or writes its name in a message. With --converse-every, the
+personas also talk among themselves in --converse-channel: one opens by turning
+to another, whoever is named answers next, and a person writing stops them.
 
 --llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
 environment variables.
@@ -21,6 +23,7 @@ import os
 import random
 import re
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, clean, display_name,
@@ -58,14 +61,25 @@ def conversation(msgs: list[Msg]) -> list[str]:
     return [render(t) for t in reversed(kept)]
 
 
+def next_speaker(reply: str, current: str, personas: list[str], rng: random.Random) -> str:
+    """Whoever the reply names, else another persona at random."""
+    others = [p for p in personas if p != current]
+    named = named_personas(reply, others)
+    return named[0] if named else rng.choice(others)
+
+
 def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str]) -> list[str]:
     """Real one-liners, then the whole profile: the most of what training put in a context."""
     pool = voices.get(fold(persona), [])
     return [*random.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile]
 
 
-def server_reply(url: str, messages: list[dict]) -> str:
-    """Any OpenAI-compatible endpoint: llama-server, Ollama, LM Studio."""
+def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
+    """Any OpenAI-compatible endpoint: llama-server, Ollama, LM Studio.
+
+    A prefill is the start of the reply, written for the model to continue."""
+    if prefill:
+        messages = [*messages, {"role": "assistant", "content": prefill}]
     # dry_* is llama-server's repeat-from-context penalty; without it a persona echoes its
     # own previous line verbatim. Other servers ignore the extra fields
     body = json.dumps({"model": "understudy", "messages": messages, "temperature": 0.8,
@@ -74,7 +88,12 @@ def server_reply(url: str, messages: list[dict]) -> str:
     req = urllib.request.Request(f"{url.rstrip('/')}/v1/chat/completions", body,
                                  {"Content-Type": "application/json"})
     with urllib.request.urlopen(req) as resp:
-        return json.load(resp)["choices"][0]["message"]["content"].strip()
+        return with_prefill(json.load(resp)["choices"][0]["message"]["content"].strip(), prefill)
+
+
+def with_prefill(text: str, prefill: str) -> str:
+    # llama-server returns the prefill with its continuation; some servers return only the rest
+    return text if not prefill or text.startswith(prefill.strip()) else f"{prefill.strip()} {text}"
 
 
 def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
@@ -105,6 +124,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--channel", action="append", metavar="NAME",
                     default=[c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()],
                     help="channel to reply in; repeat for each (default: all)")
+    ap.add_argument("--converse-every", type=float, default=0, metavar="MINUTES",
+                    help="start a conversation among the personas this often (default 0: never)")
+    ap.add_argument("--converse-length", type=int, default=20, metavar="N", help="messages per conversation")
+    ap.add_argument("--converse-channel", metavar="NAME", help="channel the conversations happen in")
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
@@ -123,12 +146,17 @@ def run(args: argparse.Namespace) -> int:
     voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
     llm_url = args.llm_url
     channels = set(args.channel)
+    if args.converse_every and not args.converse_channel:
+        raise SystemExit("--converse-every needs --converse-channel")
+    if args.converse_every and len(personas) < 2:
+        raise SystemExit("conversations need at least two personas with a token")
 
     intents = discord.Intents.default()
     intents.message_content = True
     clients = {p: discord.Client(intents=intents) for p in personas}
     persona_of: dict[int, str] = {}  # bot user id -> persona, filled as each logs in
     locks: dict[int, asyncio.Lock] = {}
+    last_person: dict[int, datetime] = {}  # channel id -> when a person last wrote there
 
     def person_name(user) -> str:
         # the account name, the same everywhere; server nicknames can be aliased to a persona
@@ -150,18 +178,51 @@ def run(args: argparse.Namespace) -> int:
                             channel=channel.name, reply_to=None, had_attachment=bool(m.attachments)))
         return conversation(list(reversed(msgs)))
 
-    async def speak(channel, persona: str) -> None:
+    async def speak(channel, persona: str, prefill: str = "") -> str:
         async with locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
                 turns = await history(channel)
                 messages = build_messages(persona, channel.name, turns[-CONTEXT_TURNS:],
                                           own_lines(persona, voices, profiles[persona]))
-                raw = await asyncio.to_thread(server_reply, llm_url, messages)
+                raw = await asyncio.to_thread(server_reply, llm_url, messages, prefill)
             speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
             text = clean_reply(raw, persona, speakers)
             if text:
                 await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
                 log.info("%s replied in #%s", persona, channel.name)
+            return text
+
+    async def converse(channel_id: int) -> None:
+        started = discord.utils.utcnow()
+        persona = random.choice(personas)
+        # opens by turning to someone, so it starts its own thread instead of carrying on the last one
+        prefill = f"@{next_speaker('', persona, personas, random)} "
+        for _ in range(args.converse_length):
+            if last_person.get(channel_id, started) > started:
+                log.info("conversation stops: a person wrote")
+                return
+            text = await speak(clients[persona].get_channel(channel_id), persona, prefill)
+            if not text:
+                log.info("conversation stops: %s had nothing to say", persona)
+                return
+            prefill = ""
+            persona = next_speaker(text, persona, personas, random)
+            await asyncio.sleep(random.uniform(3, 8))  # a beat between people, not a script
+
+    async def converse_every(minutes: float, name: str) -> None:
+        first = clients[personas[0]]
+        await asyncio.gather(*(c.wait_until_ready() for c in clients.values()))
+        channel = discord.utils.get(first.get_all_channels(), name=name, type=discord.ChannelType.text)
+        if channel is None:
+            print(f"no text channel named {name}; no conversations")
+            return
+        while True:
+            await asyncio.sleep(minutes * 60)
+            # runs under gather with the bots: an error escaping here would stop all of them
+            try:
+                await converse(channel.id)
+            except Exception:
+                log.exception("conversation failed")
 
     def wire(persona: str, client) -> None:
         @client.event
@@ -174,6 +235,7 @@ def run(args: argparse.Namespace) -> int:
             # only people trigger replies, or the personas would answer each other forever
             if message.author.bot or not isinstance(message.channel, discord.TextChannel):
                 return
+            last_person[message.channel.id] = message.created_at
             if channels and message.channel.name not in channels:
                 return
             # typing @name often autocompletes to the role Discord creates for the bot
@@ -198,7 +260,10 @@ def run(args: argparse.Namespace) -> int:
     async def start_all():
         # client.run() sets this up itself; start() doesn't, and connection trouble goes silent
         discord.utils.setup_logging()
-        await asyncio.gather(*(start(p, c, i) for i, (p, c) in enumerate(clients.items())))
+        tasks = [start(p, c, i) for i, (p, c) in enumerate(clients.items())]
+        if args.converse_every:
+            tasks.append(converse_every(args.converse_every, args.converse_channel))
+        await asyncio.gather(*tasks)
 
     asyncio.run(start_all())
     return 0

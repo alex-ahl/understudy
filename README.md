@@ -189,4 +189,17 @@ it or writes its name. `--channel NAME`, repeatable, limits where;
 `--llm-url` points at another server. They default to the `CHANNELS`
 (comma-separated) and `LLM_URL` environment variables.
 
+To have the personas talk among themselves:
+
+```toml
+[bot]
+converse_every = 60         # minutes
+converse_length = 20        # messages
+converse_channel = "general"
+```
+
+One persona opens by addressing another; whoever a message names answers next,
+otherwise another persona at random. A person writing in the channel ends the
+conversation. Needs two or more personas with a token.
+
 Run `python -m unittest discover -s tests` after changing the code.

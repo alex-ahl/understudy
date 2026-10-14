@@ -53,7 +53,7 @@ class Scrub(unittest.TestCase):
                          "Password: [password] and lösenord=[password] for the call")
 
     def test_names_the_aliases_missed_become_placeholders(self):
-        self.assertEqual(self.clean("sara och nils åker till malmö med robert", {"robert": "bob"}),
+        self.assertEqual(self.clean("karin och nils åker till malmö med robert", {"robert": "bob"}),
                          "[name] och [name] åker till [place] med bob")
 
     def test_pseudonyms_and_personas_stay(self):

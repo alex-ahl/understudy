@@ -186,7 +186,7 @@ def run(args: argparse.Namespace) -> int:
         async with locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
                 turns = await history(channel, since)
-                messages = build_messages(persona, channel.name, turns[-CONTEXT_TURNS:],
+                messages = build_messages(persona, turns[-CONTEXT_TURNS:],
                                           own_lines(persona, voices, profiles[persona]))
                 speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
                 for _ in range(1 + REROLLS):

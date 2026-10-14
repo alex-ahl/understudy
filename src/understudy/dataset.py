@@ -59,7 +59,6 @@ class Msg:
 @dataclass
 class Example:
     persona: str
-    channel: str
     lines: list[str]
     reply: str
 
@@ -168,8 +167,7 @@ def render(turn: Turn) -> str:
     return f"{turn.author}: {body}"
 
 
-def build_examples(turns: list[Turn], personas: set[str], channel: str,
-                   by_id: dict[str, Msg]) -> list[Example]:
+def build_examples(turns: list[Turn], personas: set[str], by_id: dict[str, Msg]) -> list[Example]:
     examples = []
 
     for i, turn in enumerate(turns):
@@ -204,7 +202,7 @@ def build_examples(turns: list[Turn], personas: set[str], channel: str,
                 if quoted:
                     lines.insert(0, f"> replying to {quoted.author}: {quoted.content}")
 
-        examples.append(Example(turn.author, channel, lines, turn.content))
+        examples.append(Example(turn.author, lines, turn.content))
 
     return examples
 
@@ -231,7 +229,7 @@ def downweight(examples: list[Example], pattern: re.Pattern, rng: random.Random)
             continue
         *earlier, last = e.lines
         earlier = [l for l in earlier if not pattern.search(l) or rng.random() < KEEP]
-        kept.append(Example(e.persona, e.channel, [*earlier, last], e.reply))
+        kept.append(Example(e.persona, [*earlier, last], e.reply))
     return kept
 
 
@@ -321,10 +319,10 @@ def run(args: argparse.Namespace) -> int:
         by_channel.setdefault(m.channel, []).append(m)
 
     examples = []
-    for channel, channel_msgs in by_channel.items():
+    for channel_msgs in by_channel.values():
         channel_msgs.sort(key=lambda m: m.ts)
         turns = merge_bursts(channel_msgs)
-        examples += build_examples(turns, personas, channel, by_id)
+        examples += build_examples(turns, personas, by_id)
 
     if not examples:
         seen = Counter(m.author for m in msgs).most_common(15)
@@ -359,7 +357,7 @@ def run(args: argparse.Namespace) -> int:
             for e in rows:
                 own = own_lines(e.reply, voices.get(fold(e.persona), []),
                                 profiles.get(fold(e.persona), []), rng)
-                messages = build_messages(e.persona, e.channel, e.lines, own)
+                messages = build_messages(e.persona, e.lines, own)
                 messages.append({"role": "assistant", "content": e.reply})
                 fh.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
     with (args.out / "voices.json").open("w", encoding="utf-8") as fh:

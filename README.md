@@ -27,7 +27,7 @@ flowchart LR
 ```
 
 - **One adapter, many people.** The system prompt names the speaker:
-  ``Reply as `bob` in #general.``
+  ``Reply as `bob`.``
 - **Private by default.** Real names become pseudonyms; links, emails, phone
   numbers, addresses and stray names are scrubbed before training. Everything
   private lives in one gitignored folder.

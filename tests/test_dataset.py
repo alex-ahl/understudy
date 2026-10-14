@@ -67,7 +67,7 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         ctx = by_target(rows)["bob replies to all that"]
-        self.assertEqual(ctx, "carol: first thing said here\ndave: second thing said here")
+        self.assertEqual(ctx, "carol: first thing said here\ndave: second thing said here\nbob:")
 
     def test_context_stops_at_a_conversation_gap(self):
         _, rows = run([
@@ -114,7 +114,7 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob", config='[aliases]\ndave = "pat"\nDavid = "pat"  # full name too\n')
         [(target, ctx)] = by_target(rows).items()
         self.assertEqual(target, "pat and pat are the same guy")
-        self.assertEqual(ctx, "carol: anyone seen pat lately\npat: im right here obviously")
+        self.assertEqual(ctx, "carol: anyone seen pat lately\npat: im right here obviously\nbob:")
 
     def test_alias_ignores_accents_and_stray_marks(self):
         _, rows = run([
@@ -124,7 +124,7 @@ class DiscordToSft(unittest.TestCase):
         ], "--persona", "bob", "--alias", "chloe=pat")
         [(target, ctx)] = by_target(rows).items()
         self.assertEqual(target, "pat, and pat bike too")
-        self.assertEqual(ctx, "carol: has anyone seen pat\npat: pat is here, pat is fine")
+        self.assertEqual(ctx, "carol: has anyone seen pat\npat: pat is here, pat is fine\nbob:")
 
     def test_persona_tables_are_the_personas(self):
         _, rows = run([
@@ -134,7 +134,7 @@ class DiscordToSft(unittest.TestCase):
             msg(4, "robert", "robert closes the chat", 3 * M),
         ], config='[persona.bob]\nnames = ["robert"]\n[persona.carol]\n[aliases]\ndave = "pat"\n')
         systems = sorted(r["messages"][0]["content"] for r in rows)
-        self.assertEqual(systems, ["Reply as `bob` in #general.", "Reply as `carol` in #general."])
+        self.assertEqual(systems, ["Reply as `bob`.", "Reply as `carol`."])
 
     def test_alias_keeps_the_possessive_but_not_longer_words(self):
         _, rows = run([
@@ -167,7 +167,7 @@ class DiscordToSft(unittest.TestCase):
             msg(3, "bob", "probably getting food again", 2 * M),
         ], config='[persona.bob]\nprofile = ["Always hungry."]\n')
         [row] = rows
-        self.assertEqual(row["messages"][0]["content"], "Reply as `bob` in #general.")
+        self.assertEqual(row["messages"][0]["content"], "Reply as `bob`.")
         own = [l for l in row["messages"][1]["content"].splitlines() if l.startswith("bob: ")]
         self.assertLessEqual(set(own), {"bob: Always hungry."})
 
@@ -223,7 +223,7 @@ class Always(random.Random):
 
 
 def example(reply, *lines, persona="bob"):
-    return Example(persona, "general", list(lines), reply)
+    return Example(persona, list(lines), reply)
 
 
 class Shaping(unittest.TestCase):

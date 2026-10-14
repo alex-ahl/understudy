@@ -55,14 +55,17 @@ flowchart LR
 ```sh
 mkdir -p private && cp understudy.example.toml private/understudy.toml
 # edit private/understudy.toml, export the server into private/exports/ (step 1)
-docker compose --profile tools build cpu           # gpu too, on the training machine
+docker compose --profile tools build cpu           # gpu on the training machine
 docker compose run --rm cpu pipeline --to stats    # dataset, then token lengths
-docker compose run --rm gpu pipeline --from train  # train, then convert
+docker compose run --rm gpu train                  # on the GPU machine
+docker compose run --rm convert                    # adapter -> GGUF
 docker compose up -d serve bot                     # serve-cpu instead of serve without a GPU
 ```
 
-Every command is `docker compose run --rm cpu <command>` on the CPU image or
-`... gpu <command>` on the CUDA image, with `private/` mounted in place.
+Each job has its own image, so a machine builds only what it runs: `cpu`
+(dataset, stats, bot), `gpu` (train), `convert`, and `serve` or `serve-cpu`.
+Commands run as `docker compose run --rm <image> <command>`, with `private/`
+mounted in place.
 Downloaded models are kept in the `cache` volume.
 
 ## Settings
@@ -173,7 +176,7 @@ masking in `understudy train` assumes the Llama 3 chat format.
 ## 4. Serve
 
 ```sh
-docker compose run --rm cpu convert      # -> private/outputs/adapter.gguf
+docker compose run --rm convert          # -> private/outputs/adapter.gguf
 docker compose up -d serve               # on an NVIDIA GPU; serve-cpu without one
 ```
 
@@ -222,13 +225,12 @@ conversation. Needs two or more personas with a token.
 
 ```sh
 docker compose run --rm cpu pipeline --to stats     # dataset -> stats
-docker compose run --rm gpu pipeline --from train   # train -> convert
 ```
 
 `pipeline` runs dataset → stats → train → convert, or a range of them with
-`--from` and `--to`, and stops at the first stage that fails. The CPU image has
-no training libraries and the CUDA image no scrubbing models, so the pipeline
-splits between them; on two machines, copy `private/data/` or
+`--from` and `--to`, and stops at the first stage that fails. Each image holds
+only its own stages, so in Docker it covers dataset and stats; train and
+convert run in their own images. On two machines, copy `private/data/` or
 `private/outputs/` across.
 
 ## Development

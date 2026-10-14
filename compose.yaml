@@ -1,32 +1,20 @@
 # Every service runs the understudy CLI from the repo root, with private/ mounted
-# in place and downloaded models kept in the `cache` volume.
+# in place and downloaded models kept in the `cache` volume. Images are built per
+# job (see the Dockerfile), so a machine builds only the ones it runs.
 #
-#   docker compose --profile tools build cpu   build an image (cpu or gpu)
-#   docker compose run --rm cpu dataset        any command, on the CPU image
-#   docker compose run --rm gpu train          any command, on the CUDA image
+#   docker compose --profile tools build cpu   build an image: cpu, gpu or convert
+#   docker compose run --rm cpu dataset        dataset, stats, any other CPU command
+#   docker compose run --rm gpu train          training, on an NVIDIA GPU
+#   docker compose run --rm convert            adapter -> GGUF
 #   docker compose up -d serve bot             model server and bots, on a GPU
 #   docker compose up -d serve-cpu bot         the same without one
 
-x-cpu: &cpu
-  image: understudy:cpu
-  build:
-    context: .
+x-app: &app
   volumes:
     - ./private:/work/private
     - cache:/cache
 
-x-gpu: &gpu
-  image: understudy:cuda
-  build:
-    context: .
-    args:
-      BASE: ghcr.io/ggml-org/llama.cpp:full-cuda
-      EXTRAS: train,bot
-      TORCH_INDEX: https://download.pytorch.org/whl/cu124
-      PIN: "false"
-  volumes:
-    - ./private:/work/private
-    - cache:/cache
+x-nvidia: &nvidia
   deploy:
     resources:
       reservations:
@@ -35,39 +23,51 @@ x-gpu: &gpu
             count: all
             capabilities: [gpu]
 
+x-llm: &llm
+  command: serve
+  ports:
+    - 127.0.0.1:8080:8080
+  networks:
+    default:
+      aliases: [llm]
+  restart: unless-stopped
+
 services:
   cpu:
-    <<: *cpu
+    <<: *app
+    image: understudy:cpu
+    build: {context: ., target: cpu}
     profiles: [tools]
 
   gpu:
-    <<: *gpu
+    <<: [*app, *nvidia]
+    image: understudy:train
+    build: {context: ., target: train}
+    profiles: [tools]
+
+  convert:
+    <<: *app
+    image: understudy:convert
+    build: {context: ., target: convert}
+    command: convert
     profiles: [tools]
 
   serve:
-    <<: *gpu
+    <<: [*app, *nvidia, *llm]
+    image: understudy:serve-cuda
+    build: {context: ., target: serve-cuda}
     profiles: [gpu]
-    command: serve
-    ports:
-      - 127.0.0.1:8080:8080
-    networks:
-      default:
-        aliases: [llm]
-    restart: unless-stopped
 
   serve-cpu:
-    <<: *cpu
+    <<: [*app, *llm]
+    image: understudy:serve
+    build: {context: ., target: serve}
     profiles: [cpu]
-    command: serve
-    ports:
-      - 127.0.0.1:8080:8080
-    networks:
-      default:
-        aliases: [llm]
-    restart: unless-stopped
 
   bot:
-    <<: *cpu
+    <<: *app
+    image: understudy:cpu
+    build: {context: ., target: cpu}
     command: bot
     environment:
       LLM_URL: http://llm:8080

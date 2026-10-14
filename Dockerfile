@@ -1,39 +1,65 @@
 # syntax=docker/dockerfile:1
-# understudy on top of llama.cpp's own images, which bring llama-server and the
-# LoRA converter (in /app, its requirements in the system Python). compose.yaml
-# builds it twice:
-#   cpu   BASE=llama.cpp:full       dataset, stats, convert, serve on CPU, bot
-#   cuda  BASE=llama.cpp:full-cuda  train, convert, serve on an NVIDIA GPU, bot
+# One image per job, so each machine pulls only what it runs (compose.yaml picks
+# the target):
+#   cpu         dataset, stats, bot          python slim + CPU torch
+#   train       train                        python slim + CUDA torch + Unsloth
+#   convert     convert                      llama.cpp's full image (the converter)
+#   serve       serve on CPU                 llama.cpp's server image
+#   serve-cuda  serve on an NVIDIA GPU       llama.cpp's CUDA server image
+# understudy's own code needs only the standard library, so on llama.cpp's images
+# it runs on their system Python without pip.
 
-ARG BASE=ghcr.io/ggml-org/llama.cpp:full
-FROM ${BASE}
-
-# extras to install, the torch build to take them with, and whether to pin the
-# dataset stack to docker/constraints.txt (a set that passes the tests)
-ARG EXTRAS=dataset,bot
-ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-ARG PIN=true
+ARG LLAMA_CPP=ghcr.io/ggml-org/llama.cpp
 ARG SPACY_MODEL=https://github.com/explosion/spacy-models/releases/download/sv_core_news_sm-3.8.0/sv_core_news_sm-3.8.0-py3-none-any.whl
 
-# build-essential: Triton compiles small launchers when Unsloth trains
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3-venv build-essential \
- && rm -rf /var/lib/apt/lists/*
+# ------------------------------------------------------------ pip images
 
-# understudy gets its own environment: the converter in the system Python wants an
-# older transformers than the scrubber does
-RUN python3 -m venv /venv
-ENV PATH=/venv/bin:/app:$PATH \
-    HF_HOME=/cache/huggingface
-
+FROM python:3.12-slim AS python
+ENV HF_HOME=/cache/huggingface PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /work
 COPY pyproject.toml README.md ./
-COPY docker/constraints.txt docker/
 COPY src src
-RUN pip install --no-cache-dir --extra-index-url "$TORCH_INDEX" \
-      $([ "$PIN" = true ] && echo "-c docker/constraints.txt") \
-      -e ".[$EXTRAS]" protobuf \
- && case ",$EXTRAS," in *,dataset,*) pip install --no-cache-dir "$SPACY_MODEL";; esac
+ENTRYPOINT ["understudy"]
+
+FROM python AS cpu
+ARG SPACY_MODEL
+COPY docker/constraints.txt docker/
+# CPU torch, and the dataset stack pinned to a set that passes the tests
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --extra-index-url https://download.pytorch.org/whl/cpu -c docker/constraints.txt \
+      -e ".[dataset,bot]" protobuf "$SPACY_MODEL"
 COPY tests tests
 
-ENTRYPOINT ["understudy"]
+FROM python AS train
+# gcc: Triton compiles small launchers when Unsloth trains
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+# torch from PyPI is a CUDA build on Linux; one install lets Unsloth pick its version
+RUN --mount=type=cache,target=/root/.cache/pip pip install -e ".[train]"
+
+# ------------------------------------------------------ llama.cpp images
+
+FROM scratch AS code
+COPY src/understudy /understudy
+
+FROM ${LLAMA_CPP}:full AS convert
+COPY --from=code /understudy /opt/understudy/understudy
+ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface
+WORKDIR /work
+ENTRYPOINT ["python3", "-m", "understudy"]
+
+FROM ${LLAMA_CPP}:server AS serve
+RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=code /understudy /opt/understudy/understudy
+ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH
+WORKDIR /work
+ENTRYPOINT ["python3", "-m", "understudy"]
+
+FROM ${LLAMA_CPP}:server-cuda AS serve-cuda
+RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=code /understudy /opt/understudy/understudy
+ENV PYTHONPATH=/opt/understudy HF_HOME=/cache/huggingface PATH=/app:$PATH
+WORKDIR /work
+ENTRYPOINT ["python3", "-m", "understudy"]

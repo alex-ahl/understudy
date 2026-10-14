@@ -64,7 +64,7 @@ def link(text: str) -> str:
 
 def merge_places(text: str, results: list) -> list:
     """Overlapping places become one; a street with the postcode and town after it
-    ("Storgatan 1, 111 22 Stockholm") becomes one address."""
+    ("Storgatan 1, 211 22 Malmö") becomes one address."""
     places = sorted((r for r in results if r.entity_type in ("ADDRESS", "LOCATION")),
                     key=lambda r: (r.start, -r.end))
     merged = []

@@ -28,7 +28,7 @@ class Scrub(unittest.TestCase):
     def test_scrubs_street_addresses_before_aliasing(self):
         out = self.clean("Exempelvägen 12B, 123 45 Småby. or storgatan 3", {"exempelvägen": "[place]"})
         self.assertEqual(out, "[address]. or [address]")
-        self.assertEqual(self.clean("skicka till Storgatan 1, 111 22 Stockholm tack"),
+        self.assertEqual(self.clean("skicka till Storgatan 1, 211 22 Malmö tack"),
                          "skicka till [address] tack")
 
     def test_scrubs_towns(self):
@@ -53,7 +53,7 @@ class Scrub(unittest.TestCase):
                          "Password: [password] and lösenord=[password] for the call")
 
     def test_names_the_aliases_missed_become_placeholders(self):
-        self.assertEqual(self.clean("anna och erik åker till göteborg med robert", {"robert": "bob"}),
+        self.assertEqual(self.clean("sara och nils åker till malmö med robert", {"robert": "bob"}),
                          "[name] och [name] åker till [place] med bob")
 
     def test_pseudonyms_and_personas_stay(self):

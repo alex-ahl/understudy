@@ -14,10 +14,16 @@ understudy fine-tunes one small LoRA adapter on a server's chat history and runs
 a Discord bot per person that answers in their voice: their slang, their
 running jokes, their opinions about phones.
 
-```
-Discord export ──► dataset ──► LoRA fine-tune ──► llama-server ──► one bot per persona
-  (DCE JSON)       scrubbed,      one adapter,        GGUF, runs        @-mention them, or let
-                   renamed        every persona       on a laptop       them talk among themselves
+```mermaid
+flowchart LR
+    export["<b>Discord export</b><br/>DiscordChatExporter JSON"]
+    dataset["<b>Dataset</b><br/>scrubbed, renamed"]
+    train["<b>Fine-tune</b><br/>one LoRA adapter,<br/>every persona"]
+    serve["<b>llama-server</b><br/>GGUF, CPU or GPU"]
+    bots["<b>Discord bots</b><br/>one per persona"]
+
+    export --> dataset --> train --> serve --> bots
+    bots -. "@-mention, or talk<br/>among themselves" .-> bots
 ```
 
 - **One adapter, many people.** The system prompt names the speaker:

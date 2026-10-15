@@ -38,6 +38,7 @@ MAX_LINES = 5       # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
 REROLLS = 2         # extra tries for a reply that matches --downweight
+REPLY_TIMEOUT = 300  # seconds; a CPU server takes well under a minute per reply
 
 
 def named_personas(text: str, personas: list[str]) -> list[str]:
@@ -88,8 +89,18 @@ def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
                        "dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 2}).encode()
     req = urllib.request.Request(f"{url.rstrip('/')}/v1/chat/completions", body,
                                  {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req) as resp:
+    # without a timeout, a stalled server holds the channel's lock and every later reply
+    with urllib.request.urlopen(req, timeout=REPLY_TIMEOUT) as resp:
         return with_prefill(json.load(resp)["choices"][0]["message"]["content"].strip(), prefill)
+
+
+def server_ready(url: str) -> bool:
+    """Whether llama-server has loaded its model; it answers 503 until then."""
+    try:
+        with urllib.request.urlopen(f"{url.rstrip('/')}/health", timeout=5) as resp:
+            return resp.status == 200
+    except OSError:
+        return False
 
 
 def with_prefill(text: str, prefill: str) -> str:
@@ -224,8 +235,8 @@ def run(args: argparse.Namespace) -> int:
     async def converse_every(minutes: float, name: str) -> None:
         first = clients[personas[0]]
         # wait_until_ready() raises before a client has logged in, and the logins are staggered
-        while not all(c.is_ready() for c in clients.values()):
-            await asyncio.sleep(1)
+        while not all(c.is_ready() for c in clients.values()) or not await asyncio.to_thread(server_ready, llm_url):
+            await asyncio.sleep(5)
         channel = discord.utils.get(first.get_all_channels(), name=name, type=discord.ChannelType.text)
         if channel is None:
             print(f"no text channel named {name}; no conversations")

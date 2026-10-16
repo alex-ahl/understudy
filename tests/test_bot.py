@@ -13,7 +13,7 @@ from understudy.bot import (
     own_lines,
     with_prefill,
 )
-from understudy.dataset import Msg
+from understudy.chat import Msg
 from understudy.people import People, Persona
 
 T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)

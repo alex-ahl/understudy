@@ -1,7 +1,7 @@
 import importlib.util
 import unittest
 
-from understudy.dataset import clean
+from understudy.chat import clean
 
 HAS_SCRUB_DEPS = all(importlib.util.find_spec(m) for m in ("presidio_analyzer", "gliner"))
 

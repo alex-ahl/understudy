@@ -8,10 +8,9 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from understudy.chat import VOICE_EXAMPLES, any_of
 from understudy.dataset import (
-    VOICE_EXAMPLES,
     Example,
-    any_of,
     cap,
     downweight,
     has_link,

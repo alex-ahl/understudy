@@ -14,12 +14,24 @@ import random
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from understudy.people import fold, rename
+from understudy.chat import (
+    CONTEXT_TURNS,
+    GAP_MINUTES,
+    VOICE_EXAMPLES,
+    Msg,
+    Turn,
+    any_of,
+    clean,
+    display_name,
+    merge_bursts,
+    render,
+)
+from understudy.people import fold
 from understudy.people import read as read_people
 from understudy.prompt import build_messages
 
@@ -28,33 +40,15 @@ if TYPE_CHECKING:
 
 # ---------------------------------------------------------------- tunables
 
-BURST_SECONDS = 60  # consecutive messages from one author become one turn
-GAP_MINUTES = 10  # a longer silence starts a new conversation
-CONTEXT_TURNS = 10  # how many turns of context precede the target
 MIN_TARGET_CHARS = 15  # drops "lol", "^", "yeah"
 MIN_CONTEXT_TURNS = 2  # the target needs something to be replying to
 VAL_FRACTION = 0.08
 KEEP = 0.2  # share of --downweight matches kept, in replies and in context
-VOICE_EXAMPLES = 3  # most real one-liners put in a context; the bots always use this many
 VOICE_CHARS = (12, 90)
 
 KEEP_TYPES = {"Default", "Reply"}
 
-RE_USER_MENTION = re.compile(r"<@!?(\d+)>")
-RE_ROLE_MENTION = re.compile(r"<@&\d+>")
-RE_CHAN_MENTION = re.compile(r"<#\d+>")
 RE_LINK = re.compile(r"\[link [^\]]*\]|https?://\S+|\bwww\.\S+")
-
-
-@dataclass
-class Msg:
-    id: str
-    ts: datetime
-    author: str
-    content: str
-    channel: str
-    reply_to: str | None
-    had_attachment: bool
 
 
 @dataclass
@@ -64,45 +58,11 @@ class Example:
     reply: str
 
 
-@dataclass
-class Turn:
-    author: str
-    ts: datetime
-    content: str
-    ids: list[str] = field(default_factory=list)
-    had_attachment: bool = False
-
-
 # ------------------------------------------------------------------ loading
 
 
 def parse_ts(raw: str) -> datetime:
     return datetime.fromisoformat(raw)
-
-
-def display_name(author: dict, aliases: dict[str, str]) -> str:
-    name = (author.get("nickname") or author.get("name") or "unknown").strip()
-    return aliases.get(fold(name)) or name
-
-
-def clean(content: str, mentions: list[dict], aliases: dict[str, str], scrubber: Scrubber | None = None) -> str:
-    by_id = {m.get("id"): display_name(m, aliases) for m in mentions}
-    content = RE_USER_MENTION.sub(lambda m: "@" + by_id.get(m.group(1), "someone"), content)
-    content = RE_ROLE_MENTION.sub("@role", content)
-    content = RE_CHAN_MENTION.sub("#channel", content)
-
-    # before aliasing, which would rewrite names inside links and streets and strand the rest
-    if scrubber:
-        content = scrubber.contact(content)
-
-    # alias anyone named in plain text too, so pseudonyms stay consistent.
-    # DCE already renders mentions as "@nickname", so those land here, not in RE_USER_MENTION
-    content = rename(content, aliases)
-
-    if scrubber:
-        content = scrubber.names(content)
-
-    return content.strip()
 
 
 def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None) -> tuple[list[Msg], Counter[str]]:
@@ -143,32 +103,7 @@ def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None) 
     return msgs, skipped
 
 
-# ------------------------------------------------------------ burst merging
-
-
-def merge_bursts(msgs: list[Msg]) -> list[Turn]:
-    """Three messages fired off in a row are one conversational turn."""
-    turns: list[Turn] = []
-    for m in msgs:
-        last = turns[-1] if turns else None
-        if last and last.author == m.author and (m.ts - last.ts) <= timedelta(seconds=BURST_SECONDS):
-            last.content += "\n" + m.content
-            last.ts = m.ts
-            last.ids.append(m.id)
-            last.had_attachment |= m.had_attachment
-        else:
-            turns.append(Turn(m.author, m.ts, m.content, [m.id], m.had_attachment))
-    return turns
-
-
 # --------------------------------------------------------------- windowing
-
-
-def render(turn: Turn) -> str:
-    body = turn.content
-    if turn.had_attachment:
-        body += " [attachment]"
-    return f"{turn.author}: {body}"
 
 
 def is_target(turn: Turn, personas: set[str]) -> bool:
@@ -230,11 +165,6 @@ def all_examples(msgs: list[Msg], personas: set[str]) -> list[Example]:
 
 def has_link(text: str) -> bool:
     return bool(RE_LINK.search(text))
-
-
-def any_of(patterns: list[str]) -> re.Pattern | None:
-    """One case-insensitive regex matching any of the patterns."""
-    return re.compile("|".join(f"(?:{p})" for p in patterns), re.IGNORECASE) if patterns else None
 
 
 def downweight(examples: list[Example], pattern: re.Pattern, rng: random.Random) -> list[Example]:

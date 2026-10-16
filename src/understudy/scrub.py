@@ -1,6 +1,6 @@
 """PII scrubbing for the dataset, through Presidio.
 
-Two passes around aliasing (see dataset.clean):
+Two passes around aliasing (see chat.clean):
     contact   links, emails, phone numbers, addresses, towns and passwords, before
               aliasing, which would otherwise rewrite names inside them
     names     people the aliases missed, after aliasing, with the pseudonyms allowed

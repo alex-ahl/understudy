@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from understudy.dataset import (
+from understudy.chat import (
     CONTEXT_TURNS,
     GAP_MINUTES,
     VOICE_EXAMPLES,

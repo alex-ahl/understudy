@@ -23,8 +23,9 @@ PYTHON = "/usr/bin/python3"
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy convert", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="understudy convert", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--adapter", type=Path, default=Path("private/outputs/adapter"))
     ap.add_argument("--out", type=Path, default=Path("private/outputs/adapter.gguf"))
     ap.add_argument("--model", default=MODEL, help="the base the adapter was trained on")
@@ -32,8 +33,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def command(args: argparse.Namespace) -> list[str]:
-    return [PYTHON, str(CONVERTER), str(args.adapter), "--base-model-id", args.model,
-            "--outfile", str(args.out)]
+    return [PYTHON, str(CONVERTER), str(args.adapter), "--base-model-id", args.model, "--outfile", str(args.out)]
 
 
 def run(args: argparse.Namespace) -> int:

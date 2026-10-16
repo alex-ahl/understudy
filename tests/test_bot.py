@@ -20,8 +20,15 @@ T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def msg(author, content, minutes):
-    return Msg(id=str(minutes), ts=T0 + timedelta(minutes=minutes), author=author,
-               content=content, channel="general", reply_to=None, had_attachment=False)
+    return Msg(
+        id=str(minutes),
+        ts=T0 + timedelta(minutes=minutes),
+        author=author,
+        content=content,
+        channel="general",
+        reply_to=None,
+        had_attachment=False,
+    )
 
 
 class Bot(unittest.TestCase):
@@ -31,12 +38,14 @@ class Bot(unittest.TestCase):
         self.assertEqual(named_personas("bobby isn't coming", personas), [])
 
     def test_conversation_merges_bursts_and_stops_at_a_gap(self):
-        turns = conversation([
-            msg("carol", "old topic", 0),
-            msg("bob", "new topic starts", 30),
-            msg("bob", "still bob", 30),
-            msg("carol", "answering bob", 31),
-        ])
+        turns = conversation(
+            [
+                msg("carol", "old topic", 0),
+                msg("bob", "new topic starts", 30),
+                msg("bob", "still bob", 30),
+                msg("carol", "answering bob", 31),
+            ]
+        )
         self.assertEqual(turns, ["bob: new topic starts\nstill bob", "carol: answering bob"])
 
     def test_own_lines_are_voice_lines_then_the_whole_profile(self):

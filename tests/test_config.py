@@ -50,11 +50,24 @@ class Config(unittest.TestCase):
         self.assertFalse(hasattr(parsed(config, "train"), "people"))
 
     def test_unknown_keys_and_sections_are_errors(self):
-        check({"seed": 1, "train": {"epochs": 3}, "persona": {"bob": {"names": ["robert"]}},
-               "aliases": {"carl_xx": "carl"}}, parsers())
-        for bad in ({"train": {"epoch": 3}}, {"trian": {}}, {"no_such_option": 1},
-                    {"persona": {"bob": {"name": ["robert"]}}}, {"persona": {"bob": {"names": "robert"}}},
-                    {"persona": {"bob": "robert"}}, {"aliases": {"carl_xx": 1}}):
+        check(
+            {
+                "seed": 1,
+                "train": {"epochs": 3},
+                "persona": {"bob": {"names": ["robert"]}},
+                "aliases": {"carl_xx": "carl"},
+            },
+            parsers(),
+        )
+        for bad in (
+            {"train": {"epoch": 3}},
+            {"trian": {}},
+            {"no_such_option": 1},
+            {"persona": {"bob": {"name": ["robert"]}}},
+            {"persona": {"bob": {"names": "robert"}}},
+            {"persona": {"bob": "robert"}},
+            {"aliases": {"carl_xx": 1}},
+        ):
             with self.subTest(bad), self.assertRaises(ConfigError):
                 check(bad, parsers())
 
@@ -67,21 +80,45 @@ class ConfigFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             (tmp / "private").mkdir()
-            (tmp / "export.json").write_text(json.dumps({"channel": {"name": "general"}, "messages": [
-                {"id": str(i), "type": "Default", "timestamp": f"2026-01-01T12:0{i}:00+00:00",
-                 "author": {"id": a, "name": a, "isBot": False}, "content": text,
-                 "attachments": [], "mentions": []}
-                for i, (a, text) in enumerate([("carol", "something to reply to"),
-                                               ("robert", "something else as well"),
-                                               ("bob", "bob has thoughts on it")])]}))
+            (tmp / "export.json").write_text(
+                json.dumps(
+                    {
+                        "channel": {"name": "general"},
+                        "messages": [
+                            {
+                                "id": str(i),
+                                "type": "Default",
+                                "timestamp": f"2026-01-01T12:0{i}:00+00:00",
+                                "author": {"id": a, "name": a, "isBot": False},
+                                "content": text,
+                                "attachments": [],
+                                "mentions": [],
+                            }
+                            for i, (a, text) in enumerate(
+                                [
+                                    ("carol", "something to reply to"),
+                                    ("robert", "something else as well"),
+                                    ("bob", "bob has thoughts on it"),
+                                ]
+                            )
+                        ],
+                    }
+                )
+            )
             (tmp / "private" / "understudy.toml").write_text(
                 '[persona.bob]\n[aliases]\nrobert = "pat"\n'
-                '[dataset]\ninput = "export.json"\nout = "data"\nno_scrub = true\n')
-            proc = subprocess.run([sys.executable, "-m", "understudy", "dataset"],
-                                  capture_output=True, text=True, cwd=tmp, check=False)
+                '[dataset]\ninput = "export.json"\nout = "data"\nno_scrub = true\n'
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "understudy", "dataset"], capture_output=True, text=True, cwd=tmp, check=False
+            )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            rows = [json.loads(line) for name in ("train", "val") if (tmp / "data" / f"{name}.jsonl").exists()
-                    for line in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()]
+            rows = [
+                json.loads(line)
+                for name in ("train", "val")
+                if (tmp / "data" / f"{name}.jsonl").exists()
+                for line in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()
+            ]
         [row] = rows
         self.assertIn("pat: something else", row["messages"][1]["content"])
 
@@ -89,8 +126,13 @@ class ConfigFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "understudy.toml"
             path.write_text("[train]\nepoch = 3\n")
-            proc = subprocess.run([sys.executable, "-m", "understudy", "--config", path, "dataset"],
-                                  capture_output=True, text=True, cwd=tmp, check=False)
+            proc = subprocess.run(
+                [sys.executable, "-m", "understudy", "--config", path, "dataset"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                check=False,
+            )
         self.assertEqual(proc.returncode, 2)
         self.assertIn("epoch", proc.stderr)
 

@@ -39,7 +39,7 @@ def module(name: str) -> ModuleType:
 
 
 def stages(start: str | None, stop: str | None) -> list[str]:
-    return PIPELINE[PIPELINE.index(start or PIPELINE[0]):PIPELINE.index(stop or PIPELINE[-1]) + 1]
+    return PIPELINE[PIPELINE.index(start or PIPELINE[0]) : PIPELINE.index(stop or PIPELINE[-1]) + 1]
 
 
 def pipeline(names: list[str], stage: Callable[[str], int]) -> int:
@@ -84,8 +84,9 @@ def main(argv: list[str] | None = None) -> int:
         return mod.run(parser.parse_args(args))
 
     if name == "pipeline":
-        ap = argparse.ArgumentParser(prog="understudy pipeline",
-                                     description=f"Runs {' -> '.join(PIPELINE)} with the config's settings.")
+        ap = argparse.ArgumentParser(
+            prog="understudy pipeline", description=f"Runs {' -> '.join(PIPELINE)} with the config's settings."
+        )
         ap.add_argument("--from", dest="start", choices=PIPELINE)
         ap.add_argument("--to", dest="stop", choices=PIPELINE)
         args = ap.parse_args(rest)

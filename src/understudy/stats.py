@@ -20,12 +20,14 @@ def percentile(sorted_vals: list[int], q: float) -> int:
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy stats", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="understudy stats", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("data", type=Path, nargs="?", default=Path("private/data/train.jsonl"))
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--max-seq-length", type=int, default=1024,
-                    help="warn when p95 is above it (default 1024, as in train)")
+    ap.add_argument(
+        "--max-seq-length", type=int, default=1024, help="warn when p95 is above it (default 1024, as in train)"
+    )
     return ap
 
 
@@ -37,9 +39,9 @@ def run(args: argparse.Namespace) -> int:
     # measured through the template, not raw text: it wraps every turn in header tokens.
     # render then tokenize: tokenize=True returns a dict in newer transformers, and len() counts its keys
     lengths = sorted(
-        len(tok(tok.apply_chat_template(r["messages"], tokenize=False),
-                add_special_tokens=False).input_ids)
-        for r in rows)
+        len(tok(tok.apply_chat_template(r["messages"], tokenize=False), add_special_tokens=False).input_ids)
+        for r in rows
+    )
 
     print(f"examples  {len(lengths)}")
     for label, q in (("p50", 0.50), ("p90", 0.90), ("p95", 0.95), ("p99", 0.99)):
@@ -50,8 +52,10 @@ def run(args: argparse.Namespace) -> int:
         print(f"  > {limit:<5} {over:>6}  ({over / len(lengths):.1%})")
     p95 = percentile(lengths, 0.95)
     if p95 > args.max_seq_length:
-        print(f"\np95 {p95} is over max_seq_length {args.max_seq_length}: training truncates "
-              f"over 5% of examples", file=sys.stderr)
+        print(
+            f"\np95 {p95} is over max_seq_length {args.max_seq_length}: training truncates over 5% of examples",
+            file=sys.stderr,
+        )
     return 0
 
 

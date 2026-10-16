@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-PROFILE_TAIL = 3    # the persona's own lines go this many turns before the end of the context
+PROFILE_TAIL = 3  # the persona's own lines go this many turns before the end of the context
 
 
 def system_prompt(persona: str) -> str:

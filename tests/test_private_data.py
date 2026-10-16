@@ -11,7 +11,7 @@ from understudy.people import fold
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "private" / "understudy.toml"
-MIN_NAME = 3        # shorter names match too many ordinary words
+MIN_NAME = 3  # shorter names match too many ordinary words
 MIN_LINE = 15
 
 
@@ -34,8 +34,9 @@ def secrets() -> tuple[set[str], set[str]]:
 
 def tracked() -> list[Path]:
     # safe.directory: in a container the mounted repo belongs to another user, and git refuses it
-    out = subprocess.run(["git", "-c", "safe.directory=*", "ls-files", "-z"], cwd=ROOT,
-                         capture_output=True, text=True, check=False)
+    out = subprocess.run(
+        ["git", "-c", "safe.directory=*", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=False
+    )
     return [ROOT / p for p in out.stdout.split("\0") if p] if out.returncode == 0 else []
 
 
@@ -45,8 +46,11 @@ class PrivateData(unittest.TestCase):
         files = tracked()
         if not (names or verbatim) or not files:
             self.skipTest("no private/understudy.toml or no git checkout")
-        word = re.compile(r"(?<!\w)(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
-                          + r")(?!\w)") if names else None
+        word = (
+            re.compile(r"(?<!\w)(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True))) + r")(?!\w)")
+            if names
+            else None
+        )
         hits = []
         for path in files:
             try:

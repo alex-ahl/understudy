@@ -15,12 +15,13 @@ import sys
 from pathlib import Path
 
 BASE_HF = "AI-Sweden-Models/Llama-3-8B-instruct-Q4_K_M-gguf"
-LLAMA_SERVER = "llama-server"   # on PATH in the Docker images
+LLAMA_SERVER = "llama-server"  # on PATH in the Docker images
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy serve", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="understudy serve", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--adapter", type=Path, default=Path("private/outputs/adapter.gguf"))
     ap.add_argument("--base-hf", default=BASE_HF, metavar="REPO", help="GGUF base on Hugging Face")
     ap.add_argument("--base-gguf", type=Path, metavar="FILE", help="local GGUF base; wins over --base-hf")
@@ -34,8 +35,20 @@ def parser() -> argparse.ArgumentParser:
 def command(args: argparse.Namespace) -> list[str]:
     base = ["-m", str(args.base_gguf)] if args.base_gguf else ["-hf", args.base_hf]
     # -ngl 99: all layers on the GPU; a CPU build ignores it
-    return [LLAMA_SERVER, *base, "--lora-scaled", f"{args.adapter}:{args.lora_scale}",
-            "-c", str(args.context), "-ngl", "99", "--host", args.host, "--port", str(args.port)]
+    return [
+        LLAMA_SERVER,
+        *base,
+        "--lora-scaled",
+        f"{args.adapter}:{args.lora_scale}",
+        "-c",
+        str(args.context),
+        "-ngl",
+        "99",
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+    ]
 
 
 def run(args: argparse.Namespace) -> int:

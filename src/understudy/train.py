@@ -18,8 +18,9 @@ RESPONSE_PART = "<|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy train", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="understudy train", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--data", type=Path, default=Path("private/data"))
     ap.add_argument("--out", type=Path, default=Path("private/outputs/adapter"))
     ap.add_argument("--model", default=MODEL)
@@ -53,18 +54,19 @@ def run(args: argparse.Namespace) -> int:
         lora_alpha=args.rank * 2,
         lora_dropout=0,
         bias="none",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         use_gradient_checkpointing="unsloth",
         random_state=args.seed,
     )
 
-    ds = load_dataset("json", data_files={
-        "train": str(args.data / "train.jsonl"),
-        "val": str(args.data / "val.jsonl"),
-    })
-    ds = ds.map(lambda r: {"text": tok.apply_chat_template(r["messages"], tokenize=False)},
-                remove_columns=["messages"])
+    ds = load_dataset(
+        "json",
+        data_files={
+            "train": str(args.data / "train.jsonl"),
+            "val": str(args.data / "val.jsonl"),
+        },
+    )
+    ds = ds.map(lambda r: {"text": tok.apply_chat_template(r["messages"], tokenize=False)}, remove_columns=["messages"])
 
     trainer = SFTTrainer(
         model=model,
@@ -94,8 +96,7 @@ def run(args: argparse.Namespace) -> int:
         ),
     )
     # without this the model also learns to write the context, i.e. everyone else's voice
-    trainer = train_on_responses_only(trainer, instruction_part=INSTRUCTION_PART,
-                                      response_part=RESPONSE_PART)
+    trainer = train_on_responses_only(trainer, instruction_part=INSTRUCTION_PART, response_part=RESPONSE_PART)
     trainer.train()
 
     model.save_pretrained(args.out)

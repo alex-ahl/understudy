@@ -28,14 +28,14 @@ if TYPE_CHECKING:
 
 # ---------------------------------------------------------------- tunables
 
-BURST_SECONDS = 60       # consecutive messages from one author become one turn
-GAP_MINUTES = 10         # a longer silence starts a new conversation
-CONTEXT_TURNS = 10       # how many turns of context precede the target
-MIN_TARGET_CHARS = 15    # drops "lol", "^", "yeah"
-MIN_CONTEXT_TURNS = 2    # the target needs something to be replying to
+BURST_SECONDS = 60  # consecutive messages from one author become one turn
+GAP_MINUTES = 10  # a longer silence starts a new conversation
+CONTEXT_TURNS = 10  # how many turns of context precede the target
+MIN_TARGET_CHARS = 15  # drops "lol", "^", "yeah"
+MIN_CONTEXT_TURNS = 2  # the target needs something to be replying to
 VAL_FRACTION = 0.08
-KEEP = 0.2               # share of --downweight matches kept, in replies and in context
-VOICE_EXAMPLES = 3       # most real one-liners put in a context; the bots always use this many
+KEEP = 0.2  # share of --downweight matches kept, in replies and in context
+VOICE_EXAMPLES = 3  # most real one-liners put in a context; the bots always use this many
 VOICE_CHARS = (12, 90)
 
 KEEP_TYPES = {"Default", "Reply"}
@@ -75,6 +75,7 @@ class Turn:
 
 # ------------------------------------------------------------------ loading
 
+
 def parse_ts(raw: str) -> datetime:
     return datetime.fromisoformat(raw)
 
@@ -84,8 +85,7 @@ def display_name(author: dict, aliases: dict[str, str]) -> str:
     return aliases.get(fold(name)) or name
 
 
-def clean(content: str, mentions: list[dict], aliases: dict[str, str],
-          scrubber: Scrubber | None = None) -> str:
+def clean(content: str, mentions: list[dict], aliases: dict[str, str], scrubber: Scrubber | None = None) -> str:
     by_id = {m.get("id"): display_name(m, aliases) for m in mentions}
     content = RE_USER_MENTION.sub(lambda m: "@" + by_id.get(m.group(1), "someone"), content)
     content = RE_ROLE_MENTION.sub("@role", content)
@@ -105,8 +105,7 @@ def clean(content: str, mentions: list[dict], aliases: dict[str, str],
     return content.strip()
 
 
-def load(paths: list[Path], aliases: dict[str, str],
-         scrubber: Scrubber | None) -> tuple[list[Msg], Counter[str]]:
+def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None) -> tuple[list[Msg], Counter[str]]:
     msgs: list[Msg] = []
     skipped: Counter[str] = Counter()
 
@@ -129,28 +128,30 @@ def load(paths: list[Path], aliases: dict[str, str],
                 skipped["empty / attachment-only"] += 1
                 continue
 
-            msgs.append(Msg(
-                id=m.get("id", ""),
-                ts=parse_ts(m["timestamp"]),
-                author=display_name(author, aliases),
-                content=content,
-                channel=channel,
-                reply_to=(m.get("reference") or {}).get("messageId"),
-                had_attachment=bool(m.get("attachments")),
-            ))
+            msgs.append(
+                Msg(
+                    id=m.get("id", ""),
+                    ts=parse_ts(m["timestamp"]),
+                    author=display_name(author, aliases),
+                    content=content,
+                    channel=channel,
+                    reply_to=(m.get("reference") or {}).get("messageId"),
+                    had_attachment=bool(m.get("attachments")),
+                )
+            )
 
     return msgs, skipped
 
 
 # ------------------------------------------------------------ burst merging
 
+
 def merge_bursts(msgs: list[Msg]) -> list[Turn]:
     """Three messages fired off in a row are one conversational turn."""
     turns: list[Turn] = []
     for m in msgs:
         last = turns[-1] if turns else None
-        if (last and last.author == m.author
-                and (m.ts - last.ts) <= timedelta(seconds=BURST_SECONDS)):
+        if last and last.author == m.author and (m.ts - last.ts) <= timedelta(seconds=BURST_SECONDS):
             last.content += "\n" + m.content
             last.ts = m.ts
             last.ids.append(m.id)
@@ -161,6 +162,7 @@ def merge_bursts(msgs: list[Msg]) -> list[Turn]:
 
 
 # --------------------------------------------------------------- windowing
+
 
 def render(turn: Turn) -> str:
     body = turn.content
@@ -178,7 +180,7 @@ def context(turns: list[Turn], i: int) -> list[Turn]:
     """The turns before turns[i], walking back until the conversation breaks."""
     ctx: list[Turn] = []
     cursor = turns[i].ts
-    for prev in reversed(turns[max(0, i - CONTEXT_TURNS):i]):
+    for prev in reversed(turns[max(0, i - CONTEXT_TURNS) : i]):
         if (cursor - prev.ts) > timedelta(minutes=GAP_MINUTES):
             break
         ctx.append(prev)
@@ -225,6 +227,7 @@ def all_examples(msgs: list[Msg], personas: set[str]) -> list[Example]:
 
 # ----------------------------------------------------------------- shaping
 
+
 def has_link(text: str) -> bool:
     return bool(RE_LINK.search(text))
 
@@ -263,8 +266,13 @@ def voice_pool(examples: list[Example], pattern: re.Pattern | None) -> dict[str,
     lo, hi = VOICE_CHARS
     for e in examples:
         r = e.reply
-        if ("\n" not in r and lo <= len(r) <= hi and "[" not in r and not has_link(r)
-                and not (pattern and pattern.search(r))):
+        if (
+            "\n" not in r
+            and lo <= len(r) <= hi
+            and "[" not in r
+            and not has_link(r)
+            and not (pattern and pattern.search(r))
+        ):
             pool.setdefault(fold(e.persona), []).append(r)
     return pool
 
@@ -279,8 +287,9 @@ def own_lines(reply: str, pool: list[str], profile: list[str], rng: random.Rando
     return voices + [profile[i] for i in picked]
 
 
-def shape(examples: list[Example], pattern: re.Pattern | None, max_per_persona: int | None,
-          rng: random.Random) -> tuple[list[Example], dict[str, int]]:
+def shape(
+    examples: list[Example], pattern: re.Pattern | None, max_per_persona: int | None, rng: random.Random
+) -> tuple[list[Example], dict[str, int]]:
     """Link replies dropped, --downweight and --max-per-persona applied; with counts dropped per reason."""
     kept = [e for e in examples if not has_link(e.reply)]
     dropped = {"link": len(examples) - len(kept)}
@@ -304,8 +313,14 @@ def split(examples: list[Example], rng: random.Random) -> tuple[list[Example], l
 
 # ------------------------------------------------------------------ writing
 
-def write(out: Path, splits: dict[str, list[Example]], voices: dict[str, list[str]],
-          profiles: dict[str, list[str]], rng: random.Random) -> None:
+
+def write(
+    out: Path,
+    splits: dict[str, list[Example]],
+    voices: dict[str, list[str]],
+    profiles: dict[str, list[str]],
+    rng: random.Random,
+) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for name, rows in splits.items():
         with (out / f"{name}.jsonl").open("w", encoding="utf-8") as fh:
@@ -344,21 +359,45 @@ def report_personas(examples: list[Example], scrubber: Scrubber | None) -> None:
 
 # -------------------------------------------------------------------- main
 
+
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy dataset", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", type=Path, nargs="?", default=Path("private/exports"),
-                    help="DCE .json file or a directory of them (default private/exports/)")
-    ap.add_argument("--persona", action="append", default=[],
-                    help="name to imitate, on top of the config's [persona.NAME] tables; repeatable")
+    ap = argparse.ArgumentParser(
+        prog="understudy dataset", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        default=Path("private/exports"),
+        help="DCE .json file or a directory of them (default private/exports/)",
+    )
+    ap.add_argument(
+        "--persona",
+        action="append",
+        default=[],
+        help="name to imitate, on top of the config's [persona.NAME] tables; repeatable",
+    )
     ap.add_argument("-o", "--out", type=Path, default=Path("private/data"))
-    ap.add_argument("--alias", action="append", default=[], metavar="REAL=FAKE",
-                    help="pseudonymize a name everywhere it appears, on top of the config's [aliases]")
-    ap.add_argument("--downweight", action="append", default=[], metavar="REGEX",
-                    help=f"matching replies and context lines are kept at {KEEP * 100:.0f}%%; repeatable")
+    ap.add_argument(
+        "--alias",
+        action="append",
+        default=[],
+        metavar="REAL=FAKE",
+        help="pseudonymize a name everywhere it appears, on top of the config's [aliases]",
+    )
+    ap.add_argument(
+        "--downweight",
+        action="append",
+        default=[],
+        metavar="REGEX",
+        help=f"matching replies and context lines are kept at {KEEP * 100:.0f}%%; repeatable",
+    )
     ap.add_argument("--max-per-persona", type=int, metavar="N", help="sample each persona down to N examples")
-    ap.add_argument("--no-scrub", action="store_true",
-                    help="keep links, emails, phone numbers, addresses, towns, passwords and names verbatim")
+    ap.add_argument(
+        "--no-scrub",
+        action="store_true",
+        help="keep links, emails, phone numbers, addresses, towns, passwords and names verbatim",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
@@ -385,6 +424,7 @@ def run(args: argparse.Namespace) -> int:
     scrubber = None
     if not args.no_scrub:
         from understudy.scrub import Scrubber  # loads Presidio, spaCy and GLiNER
+
         scrubber = Scrubber(allow={fold(fake) for fake in aliases.values()} | personas)
     msgs, skipped = load(paths, aliases, scrubber)
     if not msgs:

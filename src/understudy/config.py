@@ -73,8 +73,7 @@ def check_options(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> 
             continue
         if isinstance(value, dict):
             if key not in parsers:
-                raise ConfigError(f"unknown section [{key}]; sections are "
-                                  f"{', '.join([*PEOPLE, *parsers])}")
+                raise ConfigError(f"unknown section [{key}]; sections are {', '.join([*PEOPLE, *parsers])}")
             unknown = sorted(set(value) - set(options(parsers[key])))
             if unknown:
                 raise ConfigError(f"[{key}] has no option {', '.join(unknown)}")

@@ -31,7 +31,7 @@ class Persona:
 @dataclass
 class People:
     personas: list[Persona]
-    aliases: dict[str, str]     # folded real name -> pseudonym, personas' names included
+    aliases: dict[str, str]  # folded real name -> pseudonym, personas' names included
 
 
 def fold_char(ch: str) -> str:
@@ -50,8 +50,10 @@ def read(tables: dict, personas: Sequence[str] = (), aliases: Sequence[str] = ()
     """People from the config's tables, plus --persona NAME and --alias REAL=FAKE.
 
     Raises ValueError on a malformed --alias, or a name renamed to two different pseudonyms."""
-    found = [Persona(name, t.get("names", []), t.get("profile", []), t.get("token"))
-             for name, t in tables.get("persona", {}).items()]
+    found = [
+        Persona(name, t.get("names", []), t.get("profile", []), t.get("token"))
+        for name, t in tables.get("persona", {}).items()
+    ]
     found += [Persona(p) for p in personas if fold(p) not in {fold(f.name) for f in found}]
 
     mapping: dict[str, str] = {}
@@ -85,8 +87,9 @@ def replace_folded(content: str, real: str, fake: str) -> str:
             origin.append(i)
     folded = "".join(folded)
 
-    spans = [(origin[m.start()], origin[m.end() - 1] + 1)
-             for m in re.finditer(rf"(?<!\w){re.escape(real)}s?(?!\w)", folded)]
+    spans = [
+        (origin[m.start()], origin[m.end() - 1] + 1) for m in re.finditer(rf"(?<!\w){re.escape(real)}s?(?!\w)", folded)
+    ]
     for start, end in reversed(spans):
         content = content[:start] + fake + content[end:]
     return content

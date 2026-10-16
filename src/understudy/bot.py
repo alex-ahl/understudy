@@ -45,11 +45,11 @@ from understudy.prompt import build_messages
 
 log = logging.getLogger("understudy")
 
-HISTORY = 40        # raw messages; bursts and the gap cut bring it down to a conversation
-MAX_LINES = 5       # real bursts rarely run longer; loops always do
+HISTORY = 40  # raw messages; bursts and the gap cut bring it down to a conversation
+MAX_LINES = 5  # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
-REROLLS = 2         # extra tries for a reply that matches --downweight
+REROLLS = 2  # extra tries for a reply that matches --downweight
 REPLY_TIMEOUT = 300  # seconds; a CPU server takes well under a minute per reply
 
 
@@ -96,11 +96,20 @@ def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
         messages = [*messages, {"role": "assistant", "content": prefill}]
     # dry_* is llama-server's repeat-from-context penalty; without it a persona echoes its
     # own previous line verbatim. Other servers ignore the extra fields
-    body = json.dumps({"model": "understudy", "messages": messages, "temperature": 0.8,
-                       "top_p": 0.95, "max_tokens": 200, "repeat_penalty": 1.1,
-                       "dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 2}).encode()
-    req = urllib.request.Request(f"{url.rstrip('/')}/v1/chat/completions", body,
-                                 {"Content-Type": "application/json"})
+    body = json.dumps(
+        {
+            "model": "understudy",
+            "messages": messages,
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "max_tokens": 200,
+            "repeat_penalty": 1.1,
+            "dry_multiplier": 0.8,
+            "dry_base": 1.75,
+            "dry_allowed_length": 2,
+        }
+    ).encode()
+    req = urllib.request.Request(f"{url.rstrip('/')}/v1/chat/completions", body, {"Content-Type": "application/json"})
     # without a timeout, a stalled server holds the channel's lock and every later reply
     with urllib.request.urlopen(req, timeout=REPLY_TIMEOUT) as resp:
         return with_prefill(json.load(resp)["choices"][0]["message"]["content"].strip(), prefill)
@@ -140,20 +149,38 @@ def clean_reply(reply: str, persona: str, speakers: set[str]) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="understudy bot", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="understudy bot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--voices", type=Path, default=Path("private/data/voices.json"), metavar="FILE")
-    ap.add_argument("--llm-url", default=os.environ.get("LLM_URL", "http://localhost:8080"),
-                    help="OpenAI-compatible server (default http://localhost:8080)")
-    ap.add_argument("--channel", action="append", metavar="NAME",
-                    default=[c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()],
-                    help="channel to reply in; repeat for each (default: all)")
-    ap.add_argument("--converse-every", type=float, default=0, metavar="MINUTES",
-                    help="start a conversation among the personas this often (default 0: never)")
+    ap.add_argument(
+        "--llm-url",
+        default=os.environ.get("LLM_URL", "http://localhost:8080"),
+        help="OpenAI-compatible server (default http://localhost:8080)",
+    )
+    ap.add_argument(
+        "--channel",
+        action="append",
+        metavar="NAME",
+        default=[c.strip() for c in os.environ.get("CHANNELS", "").split(",") if c.strip()],
+        help="channel to reply in; repeat for each (default: all)",
+    )
+    ap.add_argument(
+        "--converse-every",
+        type=float,
+        default=0,
+        metavar="MINUTES",
+        help="start a conversation among the personas this often (default 0: never)",
+    )
     ap.add_argument("--converse-length", type=int, default=20, metavar="N", help="messages per conversation")
     ap.add_argument("--converse-channel", metavar="NAME", help="channel the conversations happen in")
-    ap.add_argument("--downweight", action="append", default=[], metavar="REGEX",
-                    help=f"a matching reply is generated again, up to {REROLLS} times, then dropped")
+    ap.add_argument(
+        "--downweight",
+        action="append",
+        default=[],
+        metavar="REGEX",
+        help=f"a matching reply is generated again, up to {REROLLS} times, then dropped",
+    )
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
@@ -161,8 +188,9 @@ def parser() -> argparse.ArgumentParser:
 class Bots:
     """One Discord client per persona, sharing what they have seen."""
 
-    def __init__(self, people: People, voices: dict[str, list[str]], args: argparse.Namespace,
-                 rng: random.Random | None = None) -> None:
+    def __init__(
+        self, people: People, voices: dict[str, list[str]], args: argparse.Namespace, rng: random.Random | None = None
+    ) -> None:
         self.aliases = people.aliases
         self.tokens = {p.name: p.token for p in people.personas if p.token}
         self.profiles = {p.name: p.profile for p in people.personas}
@@ -180,22 +208,34 @@ class Bots:
 
     def person_name(self, user) -> str:
         # the account name, the same everywhere; server nicknames can be aliased to a persona
-        return display_name({"name": user.name, "nickname": getattr(user, "global_name", None) or user.name},
-                            self.aliases)
+        return display_name(
+            {"name": user.name, "nickname": getattr(user, "global_name", None) or user.name}, self.aliases
+        )
 
     async def history(self, channel, since: datetime | None = None) -> list[str]:
         msgs = []
         async for m in channel.history(limit=HISTORY, after=since, oldest_first=False):
             if m.author.bot and m.author.id not in self.persona_of:
                 continue  # other bots, like the training data
-            mentions = [{"id": str(u.id), "name": u.name,
-                         "nickname": self.persona_of.get(u.id) or u.display_name} for u in m.mentions]
+            mentions = [
+                {"id": str(u.id), "name": u.name, "nickname": self.persona_of.get(u.id) or u.display_name}
+                for u in m.mentions
+            ]
             text = clean(m.content, mentions, self.aliases)
             if not text and not m.attachments:
                 continue
             author = self.persona_of.get(m.author.id) or self.person_name(m.author)
-            msgs.append(Msg(id=str(m.id), ts=m.created_at, author=author, content=text,
-                            channel=channel.name, reply_to=None, had_attachment=bool(m.attachments)))
+            msgs.append(
+                Msg(
+                    id=str(m.id),
+                    ts=m.created_at,
+                    author=author,
+                    content=text,
+                    channel=channel.name,
+                    reply_to=None,
+                    had_attachment=bool(m.attachments),
+                )
+            )
         return conversation(list(reversed(msgs)))
 
     async def speak(self, channel, persona: str, prefill: str = "", since: datetime | None = None) -> str:
@@ -244,8 +284,9 @@ class Bots:
 
         first = self.clients[self.personas[0]]
         # wait_until_ready() raises before a client has logged in, and the logins are staggered
-        while (not all(c.is_ready() for c in self.clients.values())
-               or not await asyncio.to_thread(server_ready, self.llm_url)):
+        while not all(c.is_ready() for c in self.clients.values()) or not await asyncio.to_thread(
+            server_ready, self.llm_url
+        ):
             await asyncio.sleep(5)
         channel = discord.utils.get(first.get_all_channels(), name=name, type=discord.ChannelType.text)
         if channel is None:
@@ -277,7 +318,8 @@ class Bots:
                 return
             # typing @name often autocompletes to the role Discord creates for the bot
             mentioned = any(u.id == client.user.id for u in message.mentions) or any(
-                r.tags and r.tags.bot_id == client.user.id for r in message.role_mentions)
+                r.tags and r.tags.bot_id == client.user.id for r in message.role_mentions
+            )
             if mentioned or persona in named_personas(message.content, self.personas):
                 # each bot posts through its own connection, so the channel comes from this client
                 await self.speak(client.get_channel(message.channel.id), persona)

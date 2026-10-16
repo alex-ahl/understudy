@@ -10,10 +10,20 @@ class Prompt(unittest.TestCase):
     def test_own_lines_go_in_near_the_end_as_the_personas_messages(self):
         turns = [f"p{i}: line {i}" for i in range(6)]
         system, user = build_messages("bob", turns, ["said this once", "Likes trains."])
-        self.assertEqual(user["content"].splitlines(),
-                         ["p0: line 0", "p1: line 1", "p2: line 2",
-                          "bob: said this once", "bob: Likes trains.",
-                          "p3: line 3", "p4: line 4", "p5: line 5", "bob:"])
+        self.assertEqual(
+            user["content"].splitlines(),
+            [
+                "p0: line 0",
+                "p1: line 1",
+                "p2: line 2",
+                "bob: said this once",
+                "bob: Likes trains.",
+                "p3: line 3",
+                "p4: line 4",
+                "p5: line 5",
+                "bob:",
+            ],
+        )
         self.assertEqual(system["content"], "Reply as `bob`.")
 
     def test_a_short_context_gets_own_lines_first(self):

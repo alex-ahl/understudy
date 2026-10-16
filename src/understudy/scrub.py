@@ -45,8 +45,9 @@ PLACEHOLDERS = {
     "PERSON": "[name]",
 }
 
-RE_LINK = re.compile(r"^([(\['\"<]*)(?:https?://)?(?:www\.)?([^\s/?#<>'\"]+).*?([.,!?)\]'\">]*)$",
-                     re.IGNORECASE | re.DOTALL)
+RE_LINK = re.compile(
+    r"^([(\['\"<]*)(?:https?://)?(?:www\.)?([^\s/?#<>'\"]+).*?([.,!?)\]'\">]*)$", re.IGNORECASE | re.DOTALL
+)
 # key=value forms the model misses; the key stays, so the sentence still reads
 RE_PASSWORD = re.compile(r"\b(password|passcode|lösenord|pwd)(\s*[:=]\s*)\S+", re.IGNORECASE)
 RE_DIGIT = re.compile(r"\d")
@@ -69,13 +70,13 @@ def link(text: str) -> str:
 def merge_places(text: str, results: list) -> list:
     """Overlapping places become one; a street with the postcode and town after it
     ("Storgatan 1, 211 22 Malmö") becomes one address."""
-    places = sorted((r for r in results if r.entity_type in ("ADDRESS", "LOCATION")),
-                    key=lambda r: (r.start, -r.end))
+    places = sorted((r for r in results if r.entity_type in ("ADDRESS", "LOCATION")), key=lambda r: (r.start, -r.end))
     merged = []
     for r in places:
         last = merged[-1] if merged else None
-        if last and (r.start < last.end or (last.entity_type == "ADDRESS"
-                                            and RE_JOIN.fullmatch(text[last.end:r.start]))):
+        if last and (
+            r.start < last.end or (last.entity_type == "ADDRESS" and RE_JOIN.fullmatch(text[last.end : r.start]))
+        ):
             last.end = max(last.end, r.end)
             if r.entity_type == "ADDRESS":
                 last.entity_type = "ADDRESS"
@@ -92,6 +93,7 @@ def merge_places(text: str, results: list) -> list:
 def spacy_model() -> None:
     import spacy.util
     from spacy.cli.download import download
+
     if not spacy.util.is_package(SPACY_MODEL):
         download(SPACY_MODEL)
 
@@ -102,12 +104,13 @@ class Scrubber:
         logging.getLogger("presidio-analyzer").setLevel(logging.ERROR)
         logging.getLogger("transformers").setLevel(logging.ERROR)
         spacy_model()
-        nlp = NlpEngineProvider(nlp_configuration={
-            "nlp_engine_name": "spacy",
-            "models": [{"lang_code": LANGUAGE, "model_name": SPACY_MODEL}],
-            "ner_model_configuration": {"model_to_presidio_entity_mapping": {
-                "PRS": "PERSON", "LOC": "LOCATION"}},
-        }).create_engine()
+        nlp = NlpEngineProvider(
+            nlp_configuration={
+                "nlp_engine_name": "spacy",
+                "models": [{"lang_code": LANGUAGE, "model_name": SPACY_MODEL}],
+                "ner_model_configuration": {"model_to_presidio_entity_mapping": {"PRS": "PERSON", "LOC": "LOCATION"}},
+            }
+        ).create_engine()
         registry = RecognizerRegistry(supported_languages=[LANGUAGE])
         for recognizer in (
             UrlRecognizer(supported_language=LANGUAGE),
@@ -115,16 +118,24 @@ class Scrubber:
             PhoneRecognizer(supported_language=LANGUAGE, supported_regions=PHONE_REGIONS),
             # spaCy also finds lowercase towns GLiNER misses, and countries with them
             SpacyRecognizer(supported_language=LANGUAGE, supported_entities=["PERSON", "LOCATION"]),
-            FixedLabelGLiNER(supported_language=LANGUAGE, model_name=GLINER_MODEL, entity_mapping={
-                "street address": "ADDRESS", "city": "LOCATION", "town": "LOCATION",
-                "email": "EMAIL_ADDRESS", "organization": "ORGANIZATION"}),
+            FixedLabelGLiNER(
+                supported_language=LANGUAGE,
+                model_name=GLINER_MODEL,
+                entity_mapping={
+                    "street address": "ADDRESS",
+                    "city": "LOCATION",
+                    "town": "LOCATION",
+                    "email": "EMAIL_ADDRESS",
+                    "organization": "ORGANIZATION",
+                },
+            ),
         ):
             registry.add_recognizer(recognizer)
-        self.analyzer = AnalyzerEngine(nlp_engine=nlp, registry=registry,
-                                       supported_languages=[LANGUAGE])
+        self.analyzer = AnalyzerEngine(nlp_engine=nlp, registry=registry, supported_languages=[LANGUAGE])
         self.anonymizer = AnonymizerEngine()
-        self.operators = {entity: OperatorConfig("replace", {"new_value": value})
-                          for entity, value in PLACEHOLDERS.items()}
+        self.operators = {
+            entity: OperatorConfig("replace", {"new_value": value}) for entity, value in PLACEHOLDERS.items()
+        }
         self.operators["URL"] = OperatorConfig("custom", {"lambda": link})
         self.organizations: Counter[str] = Counter()
 
@@ -140,13 +151,15 @@ class Scrubber:
         text = RE_PASSWORD.sub(r"\1\2[password]", text)
         results = self.analyzer.analyze(text, LANGUAGE, entities=[*CONTACT, "ORGANIZATION"])
         # a street without a number ("på gatan") identifies no one
-        contact = [r for r in results if r.entity_type in CONTACT and
-                   (r.entity_type != "ADDRESS" or RE_DIGIT.search(text[r.start:r.end]))]
+        contact = [
+            r
+            for r in results
+            if r.entity_type in CONTACT and (r.entity_type != "ADDRESS" or RE_DIGIT.search(text[r.start : r.end]))
+        ]
         contact = merge_places(text, contact)
         for r in results:
-            if r.entity_type == "ORGANIZATION" and not any(
-                    c.start < r.end and r.start < c.end for c in contact):
-                self.organizations[text[r.start:r.end].lower()] += 1
+            if r.entity_type == "ORGANIZATION" and not any(c.start < r.end and r.start < c.end for c in contact):
+                self.organizations[text[r.start : r.end].lower()] += 1
         return self._replace(text, contact)
 
     def names(self, text: str) -> str:
@@ -154,6 +167,9 @@ class Scrubber:
         if not text:
             return text
         # not Presidio's allow_list: its regex mode matches substrings, its exact mode is case-sensitive
-        results = [r for r in self.analyzer.analyze(text, LANGUAGE, entities=["PERSON"])
-                   if fold(text[r.start:r.end]) not in self.allow]
+        results = [
+            r
+            for r in self.analyzer.analyze(text, LANGUAGE, entities=["PERSON"])
+            if fold(text[r.start : r.end]) not in self.allow
+        ]
         return self._replace(text, results)

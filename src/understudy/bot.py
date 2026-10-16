@@ -214,11 +214,13 @@ def run(args: argparse.Namespace) -> int:
                 log.info("%s replied in #%s", persona, channel.name)
             return text
 
+    rng = random.Random()
+
     async def converse(channel_id: int) -> None:
         started = discord.utils.utcnow()
         persona = random.choice(personas)
         # opens by turning to someone, so it starts its own thread instead of carrying on the last one
-        prefill = f"@{next_speaker('', persona, personas, random)} "
+        prefill = f"@{next_speaker('', persona, personas, rng)} "
         for _ in range(args.converse_length):
             if last_person.get(channel_id, started) > started:
                 log.info("conversation stops: a person wrote")
@@ -229,7 +231,7 @@ def run(args: argparse.Namespace) -> int:
                 log.info("conversation stops: %s had nothing to say", persona)
                 return
             prefill = ""
-            persona = next_speaker(text, persona, personas, random)
+            persona = next_speaker(text, persona, personas, rng)
             await asyncio.sleep(random.uniform(3, 8))  # a beat between people, not a script
 
     async def converse_every(minutes: float, name: str) -> None:

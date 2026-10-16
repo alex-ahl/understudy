@@ -234,6 +234,7 @@ class Shaping(unittest.TestCase):
 
     def test_downweight_patterns_match_any_ignoring_case(self):
         pattern = any_of(["tonight", r"\bmeet up\b"])
+        assert pattern is not None
         self.assertTrue(pattern.search("Shall we MEET UP?"))
         self.assertTrue(pattern.search("tonight then"))
         self.assertFalse(pattern.search("plans"))

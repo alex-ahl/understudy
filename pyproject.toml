@@ -18,3 +18,7 @@ bot = ["discord.py"]
 
 [project.scripts]
 understudy = "understudy.cli:main"
+
+[tool.basedpyright]
+include = ["src", "tests"]
+typeCheckingMode = "standard"

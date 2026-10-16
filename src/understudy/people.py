@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 
@@ -45,7 +46,7 @@ def fold(text: str) -> str:
     return "".join(fold_char(ch) for ch in text)
 
 
-def read(tables: dict, personas: list[str] = (), aliases: list[str] = ()) -> People:
+def read(tables: dict, personas: Sequence[str] = (), aliases: Sequence[str] = ()) -> People:
     """People from the config's tables, plus --persona NAME and --alias REAL=FAKE.
 
     Raises ValueError on a malformed --alias, or a name renamed to two different pseudonyms."""

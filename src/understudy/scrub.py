@@ -86,10 +86,10 @@ def merge_places(text: str, results: list) -> list:
 
 
 def spacy_model() -> None:
-    import spacy.cli
     import spacy.util
+    from spacy.cli.download import download
     if not spacy.util.is_package(SPACY_MODEL):
-        spacy.cli.download(SPACY_MODEL)
+        download(SPACY_MODEL)
 
 
 class Scrubber:

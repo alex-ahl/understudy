@@ -5,9 +5,10 @@
 Each persona with a `token` in its [persona.NAME] table is its own bot account.
 The voice lines come from private/data/voices.json, written by understudy
 dataset. A persona replies to the channel's recent conversation when someone
-@-mentions it or writes its name in a message. With --converse-every, the
-personas also talk among themselves in --converse-channel: one opens by turning
-to another, whoever is named answers next, and a person writing stops them.
+@-mentions it or writes its name in a message. With --converse-every or
+--converse-at, the personas also talk among themselves in --converse-channel:
+one opens by turning to another, whoever is named answers next, and a person
+writing stops them.
 
 --llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
 environment variables.
@@ -24,7 +25,7 @@ import random
 import re
 import sys
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,11 @@ def next_speaker(reply: str, current: str, personas: list[str], rng: random.Rand
     others = [p for p in personas if p != current]
     named = named_personas(reply, others)
     return named[0] if named else rng.choice(others)
+
+
+def seconds_until(now: datetime, times: list[time]) -> float:
+    """Until the next of the daily UTC times; one already past today comes round tomorrow."""
+    return min((datetime.combine(now.date(), t, UTC) - now).total_seconds() % 86400 for t in times)
 
 
 def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str], rng: random.Random) -> list[str]:
@@ -171,6 +177,13 @@ def parser() -> argparse.ArgumentParser:
         metavar="MINUTES",
         help="start a conversation among the personas this often (default 0: never)",
     )
+    ap.add_argument(
+        "--converse-at",
+        action="append",
+        default=[],
+        metavar="HH:MM",
+        help="start a conversation every day at this UTC time, instead of --converse-every; repeat for each",
+    )
     ap.add_argument("--converse-length", type=int, default=20, metavar="N", help="messages per conversation")
     ap.add_argument("--converse-channel", metavar="NAME", help="channel the conversations happen in")
     ap.add_argument(
@@ -224,6 +237,8 @@ class Bots:
             "xtc_threshold": args.xtc_threshold,
         }
         self.converse_length: int = args.converse_length
+        # the config passes strings, which argparse doesn't run through type=
+        self.converse_at = [time.fromisoformat(t) for t in args.converse_at]
         self.rng = rng or random.Random()
         self.clients: dict[str, Any] = {}
         self.persona_of: dict[int, str] = {}  # bot user id -> persona, filled as each logs in
@@ -317,12 +332,15 @@ class Bots:
             log.warning("no text channel named %s; no conversations", name)
             return
         while True:
+            if self.converse_at:
+                await asyncio.sleep(seconds_until(datetime.now(UTC), self.converse_at))
             # runs under gather with the bots: an error escaping here would stop all of them
             try:
                 await self.converse(channel.id)
             except Exception:
                 log.exception("conversation failed")
-            await asyncio.sleep(minutes * 60)
+            if not self.converse_at:
+                await asyncio.sleep(minutes * 60)
 
     def wire(self, persona: str, client) -> None:
         import discord
@@ -368,7 +386,7 @@ class Bots:
         for persona, client in self.clients.items():
             self.wire(persona, client)
         tasks = [self.start(p, i) for i, p in enumerate(self.personas)]
-        if converse_every and converse_channel:
+        if (converse_every or self.converse_at) and converse_channel:
             tasks.append(self.converse_every(converse_every, converse_channel))
         await asyncio.gather(*tasks)
 
@@ -384,10 +402,11 @@ def run(args: argparse.Namespace) -> int:
     if not bots.personas:
         print('no persona has a token: add token = "..." to its [persona.NAME] table', file=sys.stderr)
         return 1
-    if args.converse_every and not args.converse_channel:
-        print("--converse-every needs --converse-channel", file=sys.stderr)
+    talks = args.converse_every or args.converse_at
+    if talks and not args.converse_channel:
+        print("--converse-every and --converse-at need --converse-channel", file=sys.stderr)
         return 1
-    if args.converse_every and len(bots.personas) < 2:
+    if talks and len(bots.personas) < 2:
         print("conversations need at least two personas with a token", file=sys.stderr)
         return 1
     asyncio.run(bots.run(args.converse_every, args.converse_channel))

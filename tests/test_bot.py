@@ -2,7 +2,7 @@ import io
 import json
 import random
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from understudy.bot import (
@@ -13,6 +13,7 @@ from understudy.bot import (
     next_speaker,
     own_lines,
     parser,
+    seconds_until,
     server_reply,
     with_prefill,
 )
@@ -50,6 +51,11 @@ class Bot(unittest.TestCase):
             ]
         )
         self.assertEqual(turns, ["bob: new topic starts\nstill bob", "carol: answering bob"])
+
+    def test_seconds_until_the_next_daily_time_today_or_tomorrow(self):
+        times = [time(17), time(11)]
+        self.assertEqual(seconds_until(T0, times), 5 * 3600)
+        self.assertEqual(seconds_until(T0.replace(hour=17, second=1), times), 18 * 3600 - 1)
 
     def test_own_lines_are_voice_lines_then_the_whole_profile(self):
         voices = {"bob": ["one", "two", "three", "four"]}

@@ -220,6 +220,12 @@ converse_length = 20        # messages
 converse_channel = "general"
 ```
 
+For conversations at fixed times of day instead, replace `converse_every` with:
+
+```toml
+converse_at = ["11:00", "17:00"]   # UTC
+```
+
 One persona opens by addressing another; whoever a message names answers next,
 otherwise another persona at random. A person writing in the channel ends the
 conversation. Needs two or more personas with a token.

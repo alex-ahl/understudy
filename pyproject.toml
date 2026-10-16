@@ -22,6 +22,9 @@ understudy = "understudy.cli:main"
 [tool.ruff]
 line-length = 120
 
+[tool.ruff.lint]
+extend-select = ["C90", "PLR0912", "PLR0915"]
+
 [tool.basedpyright]
 include = ["src", "tests"]
 typeCheckingMode = "standard"

@@ -22,9 +22,11 @@ import logging
 import os
 import random
 import re
+import sys
 import urllib.request
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from understudy.dataset import (
     CONTEXT_TURNS,
@@ -37,7 +39,7 @@ from understudy.dataset import (
     merge_bursts,
     render,
 )
-from understudy.people import fold
+from understudy.people import People, fold
 from understudy.people import read as read_people
 from understudy.prompt import build_messages
 
@@ -80,10 +82,10 @@ def next_speaker(reply: str, current: str, personas: list[str], rng: random.Rand
     return named[0] if named else rng.choice(others)
 
 
-def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str]) -> list[str]:
+def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str], rng: random.Random) -> list[str]:
     """Real one-liners, then the whole profile: the most of what training put in a context."""
     pool = voices.get(fold(persona), [])
-    return [*random.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile]
+    return [*rng.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile]
 
 
 def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
@@ -156,64 +158,59 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def run(args: argparse.Namespace) -> int:
+class Bots:
+    """One Discord client per persona, sharing what they have seen."""
 
-    import discord
+    def __init__(self, people: People, voices: dict[str, list[str]], args: argparse.Namespace,
+                 rng: random.Random | None = None) -> None:
+        self.aliases = people.aliases
+        self.tokens = {p.name: p.token for p in people.personas if p.token}
+        self.profiles = {p.name: p.profile for p in people.personas}
+        self.personas = list(self.tokens)
+        self.voices = voices
+        self.llm_url: str = args.llm_url
+        self.channels = set(args.channel)
+        self.avoid = any_of(args.downweight)
+        self.converse_length: int = args.converse_length
+        self.rng = rng or random.Random()
+        self.clients: dict[str, Any] = {}
+        self.persona_of: dict[int, str] = {}  # bot user id -> persona, filled as each logs in
+        self.locks: dict[int, asyncio.Lock] = {}
+        self.last_person: dict[int, datetime] = {}  # channel id -> when a person last wrote there
 
-    people = read_people(args.people)
-    aliases = people.aliases
-    tokens = {p.name: p.token for p in people.personas if p.token}
-    profiles = {p.name: p.profile for p in people.personas}
-    personas = list(tokens)
-    if not personas:
-        raise SystemExit('no persona has a token: add token = "..." to its [persona.NAME] table')
-    voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
-    llm_url = args.llm_url
-    channels = set(args.channel)
-    avoid = any_of(args.downweight)
-    if args.converse_every and not args.converse_channel:
-        raise SystemExit("--converse-every needs --converse-channel")
-    if args.converse_every and len(personas) < 2:
-        raise SystemExit("conversations need at least two personas with a token")
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-    clients = {p: discord.Client(intents=intents) for p in personas}
-    persona_of: dict[int, str] = {}  # bot user id -> persona, filled as each logs in
-    locks: dict[int, asyncio.Lock] = {}
-    last_person: dict[int, datetime] = {}  # channel id -> when a person last wrote there
-
-    def person_name(user) -> str:
+    def person_name(self, user) -> str:
         # the account name, the same everywhere; server nicknames can be aliased to a persona
         return display_name({"name": user.name, "nickname": getattr(user, "global_name", None) or user.name},
-                            aliases)
+                            self.aliases)
 
-    async def history(channel, since: datetime | None = None) -> list[str]:
+    async def history(self, channel, since: datetime | None = None) -> list[str]:
         msgs = []
         async for m in channel.history(limit=HISTORY, after=since, oldest_first=False):
-            if m.author.bot and m.author.id not in persona_of:
+            if m.author.bot and m.author.id not in self.persona_of:
                 continue  # other bots, like the training data
             mentions = [{"id": str(u.id), "name": u.name,
-                         "nickname": persona_of.get(u.id) or u.display_name} for u in m.mentions]
-            text = clean(m.content, mentions, aliases)
+                         "nickname": self.persona_of.get(u.id) or u.display_name} for u in m.mentions]
+            text = clean(m.content, mentions, self.aliases)
             if not text and not m.attachments:
                 continue
-            author = persona_of.get(m.author.id) or person_name(m.author)
+            author = self.persona_of.get(m.author.id) or self.person_name(m.author)
             msgs.append(Msg(id=str(m.id), ts=m.created_at, author=author, content=text,
                             channel=channel.name, reply_to=None, had_attachment=bool(m.attachments)))
         return conversation(list(reversed(msgs)))
 
-    async def speak(channel, persona: str, prefill: str = "", since: datetime | None = None) -> str:
-        async with locks.setdefault(channel.id, asyncio.Lock()):
+    async def speak(self, channel, persona: str, prefill: str = "", since: datetime | None = None) -> str:
+        import discord
+
+        async with self.locks.setdefault(channel.id, asyncio.Lock()):
             async with channel.typing():
-                turns = await history(channel, since)
-                messages = build_messages(persona, turns[-CONTEXT_TURNS:],
-                                          own_lines(persona, voices, profiles[persona]))
-                speakers = {fold(p) for p in personas} | {fold(t.split(": ", 1)[0]) for t in turns}
+                turns = await self.history(channel, since)
+                own = own_lines(persona, self.voices, self.profiles[persona], self.rng)
+                messages = build_messages(persona, turns[-CONTEXT_TURNS:], own)
+                speakers = {fold(p) for p in self.personas} | {fold(t.split(": ", 1)[0]) for t in turns}
                 for _ in range(1 + REROLLS):
-                    raw = await asyncio.to_thread(server_reply, llm_url, messages, prefill)
+                    raw = await asyncio.to_thread(server_reply, self.llm_url, messages, prefill)
                     # matched on the raw reply: cleanup removes some of what the patterns look for
-                    if not (avoid and avoid.search(raw)):
+                    if not (self.avoid and self.avoid.search(raw)):
                         break
                     log.info("%s's reply matched --downweight, generating again", persona)
                 else:
@@ -224,85 +221,110 @@ def run(args: argparse.Namespace) -> int:
                 log.info("%s replied in #%s", persona, channel.name)
             return text
 
-    rng = random.Random()
-
-    async def converse(channel_id: int) -> None:
-        started = discord.utils.utcnow()
-        persona = random.choice(personas)
+    async def converse(self, channel_id: int) -> None:
+        started = datetime.now(UTC)
+        persona = self.rng.choice(self.personas)
         # opens by turning to someone, so it starts its own thread instead of carrying on the last one
-        prefill = f"@{next_speaker('', persona, personas, rng)} "
-        for _ in range(args.converse_length):
-            if last_person.get(channel_id, started) > started:
+        prefill = f"@{next_speaker('', persona, self.personas, self.rng)} "
+        for _ in range(self.converse_length):
+            if self.last_person.get(channel_id, started) > started:
                 log.info("conversation stops: a person wrote")
                 return
             # only what was said since it started: each conversation begins blank
-            text = await speak(clients[persona].get_channel(channel_id), persona, prefill, started)
+            text = await self.speak(self.clients[persona].get_channel(channel_id), persona, prefill, started)
             if not text:
                 log.info("conversation stops: %s had nothing to say", persona)
                 return
             prefill = ""
-            persona = next_speaker(text, persona, personas, rng)
-            await asyncio.sleep(random.uniform(3, 8))  # a beat between people, not a script
+            persona = next_speaker(text, persona, self.personas, self.rng)
+            await asyncio.sleep(self.rng.uniform(3, 8))  # a beat between people, not a script
 
-    async def converse_every(minutes: float, name: str) -> None:
-        first = clients[personas[0]]
+    async def converse_every(self, minutes: float, name: str) -> None:
+        import discord
+
+        first = self.clients[self.personas[0]]
         # wait_until_ready() raises before a client has logged in, and the logins are staggered
-        while not all(c.is_ready() for c in clients.values()) or not await asyncio.to_thread(server_ready, llm_url):
+        while (not all(c.is_ready() for c in self.clients.values())
+               or not await asyncio.to_thread(server_ready, self.llm_url)):
             await asyncio.sleep(5)
         channel = discord.utils.get(first.get_all_channels(), name=name, type=discord.ChannelType.text)
         if channel is None:
-            print(f"no text channel named {name}; no conversations")
+            log.warning("no text channel named %s; no conversations", name)
             return
         while True:
             # runs under gather with the bots: an error escaping here would stop all of them
             try:
-                await converse(channel.id)
+                await self.converse(channel.id)
             except Exception:
                 log.exception("conversation failed")
             await asyncio.sleep(minutes * 60)
 
-    def wire(persona: str, client) -> None:
+    def wire(self, persona: str, client) -> None:
+        import discord
+
         @client.event
         async def on_ready():
-            persona_of[client.user.id] = persona
-            print(f"{persona} logged in as {client.user}")
+            self.persona_of[client.user.id] = persona
+            log.info("%s logged in as %s", persona, client.user)
 
         @client.event
         async def on_message(message):
             # only people trigger replies, or the personas would answer each other forever
             if message.author.bot or not isinstance(message.channel, discord.TextChannel):
                 return
-            last_person[message.channel.id] = message.created_at
-            if channels and message.channel.name not in channels:
+            self.last_person[message.channel.id] = message.created_at
+            if self.channels and message.channel.name not in self.channels:
                 return
             # typing @name often autocompletes to the role Discord creates for the bot
             mentioned = any(u.id == client.user.id for u in message.mentions) or any(
                 r.tags and r.tags.bot_id == client.user.id for r in message.role_mentions)
-            if mentioned or persona in named_personas(message.content, personas):
+            if mentioned or persona in named_personas(message.content, self.personas):
                 # each bot posts through its own connection, so the channel comes from this client
-                await speak(client.get_channel(message.channel.id), persona)
+                await self.speak(client.get_channel(message.channel.id), persona)
 
-    for persona, client in clients.items():
-        wire(persona, client)
-
-    async def start(persona: str, client, delay: float) -> None:
+    async def start(self, persona: str, delay: float) -> None:
         # a small gap so the logins don't all hit Discord in the same instant
         await asyncio.sleep(delay)
         # one bad token or missing intent shouldn't take the other personas down with it
         try:
-            await client.start(tokens[persona])
+            await self.clients[persona].start(self.tokens[persona])
         except Exception as e:  # noqa: BLE001
-            print(f"{persona} could not connect: {type(e).__name__}: {e}")
+            log.error("%s could not connect: %s: %s", persona, type(e).__name__, e)
 
-    async def start_all():
+    async def run(self, converse_every: float, converse_channel: str | None) -> None:
+        import discord
+
         # client.run() sets this up itself; start() doesn't, and connection trouble goes silent
         discord.utils.setup_logging()
-        tasks = [start(p, c, i) for i, (p, c) in enumerate(clients.items())]
-        if args.converse_every:
-            tasks.append(converse_every(args.converse_every, args.converse_channel))
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self.clients = {p: discord.Client(intents=intents) for p in self.personas}
+        for persona, client in self.clients.items():
+            self.wire(persona, client)
+        tasks = [self.start(p, i) for i, p in enumerate(self.personas)]
+        if converse_every and converse_channel:
+            tasks.append(self.converse_every(converse_every, converse_channel))
         await asyncio.gather(*tasks)
 
-    asyncio.run(start_all())
+
+def run(args: argparse.Namespace) -> int:
+    try:
+        people = read_people(args.people)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
+    bots = Bots(people, voices, args)
+    if not bots.personas:
+        print('no persona has a token: add token = "..." to its [persona.NAME] table', file=sys.stderr)
+        return 1
+    if args.converse_every and not args.converse_channel:
+        print("--converse-every needs --converse-channel", file=sys.stderr)
+        return 1
+    if args.converse_every and len(bots.personas) < 2:
+        print("conversations need at least two personas with a token", file=sys.stderr)
+        return 1
+    asyncio.run(bots.run(args.converse_every, args.converse_channel))
     return 0
 
 

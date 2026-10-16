@@ -169,43 +169,57 @@ def render(turn: Turn) -> str:
     return f"{turn.author}: {body}"
 
 
+def is_target(turn: Turn, personas: set[str]) -> bool:
+    # an attachment: the message meant something only alongside its image
+    return fold(turn.author) in personas and len(turn.content) >= MIN_TARGET_CHARS and not turn.had_attachment
+
+
+def context(turns: list[Turn], i: int) -> list[Turn]:
+    """The turns before turns[i], walking back until the conversation breaks."""
+    ctx: list[Turn] = []
+    cursor = turns[i].ts
+    for prev in reversed(turns[max(0, i - CONTEXT_TURNS):i]):
+        if (cursor - prev.ts) > timedelta(minutes=GAP_MINUTES):
+            break
+        ctx.append(prev)
+        cursor = prev.ts
+    return ctx[::-1]
+
+
+def quoted_reply(turn: Turn, ctx: list[Turn], by_id: dict[str, Msg]) -> str | None:
+    """The message `turn` explicitly replies to, if it scrolled out of the context."""
+    ref = by_id.get(turn.ids[0]) if turn.ids else None
+    ref_id = ref.reply_to if ref else None
+    if not ref_id or any(ref_id in t.ids for t in ctx):
+        return None
+    quoted = by_id.get(ref_id)
+    return f"> replying to {quoted.author}: {quoted.content}" if quoted else None
+
+
 def build_examples(turns: list[Turn], personas: set[str], by_id: dict[str, Msg]) -> list[Example]:
     examples = []
-
     for i, turn in enumerate(turns):
-        if fold(turn.author) not in personas:
+        if not is_target(turn, personas):
             continue
-        if len(turn.content) < MIN_TARGET_CHARS:
-            continue
-        if turn.had_attachment:
-            continue  # the message meant something only alongside its image
-
-        # walk back until the conversation breaks
-        ctx: list[Turn] = []
-        cursor = turn.ts
-        for prev in reversed(turns[max(0, i - CONTEXT_TURNS):i]):
-            if (cursor - prev.ts) > timedelta(minutes=GAP_MINUTES):
-                break
-            ctx.append(prev)
-            cursor = prev.ts
-        ctx.reverse()
-
+        ctx = context(turns, i)
         if len(ctx) < MIN_CONTEXT_TURNS:
             continue
-
-        lines = [render(t) for t in ctx]
-
-        # an explicit reply to something that scrolled out of the window
-        if turn.ids:
-            ref = by_id.get(turn.ids[0])
-            ref_id = ref.reply_to if ref else None
-            if ref_id and not any(ref_id in t.ids for t in ctx):
-                quoted = by_id.get(ref_id)
-                if quoted:
-                    lines.insert(0, f"> replying to {quoted.author}: {quoted.content}")
-
+        quote = quoted_reply(turn, ctx, by_id)
+        lines = [*([quote] if quote else []), *(render(t) for t in ctx)]
         examples.append(Example(turn.author, lines, turn.content))
+    return examples
 
+
+def all_examples(msgs: list[Msg], personas: set[str]) -> list[Example]:
+    """Examples from every channel, each read in order on its own."""
+    by_id = {m.id: m for m in msgs}
+    by_channel: dict[str, list[Msg]] = {}
+    for m in msgs:
+        by_channel.setdefault(m.channel, []).append(m)
+    examples = []
+    for channel_msgs in by_channel.values():
+        channel_msgs.sort(key=lambda m: m.ts)
+        examples += build_examples(merge_bursts(channel_msgs), personas, by_id)
     return examples
 
 
@@ -265,6 +279,69 @@ def own_lines(reply: str, pool: list[str], profile: list[str], rng: random.Rando
     return voices + [profile[i] for i in picked]
 
 
+def shape(examples: list[Example], pattern: re.Pattern | None, max_per_persona: int | None,
+          rng: random.Random) -> tuple[list[Example], dict[str, int]]:
+    """Link replies dropped, --downweight and --max-per-persona applied; with counts dropped per reason."""
+    kept = [e for e in examples if not has_link(e.reply)]
+    dropped = {"link": len(examples) - len(kept)}
+    if pattern:
+        n = len(kept)
+        kept = downweight(kept, pattern, rng)
+        dropped["downweighted"] = n - len(kept)
+    if max_per_persona:
+        n = len(kept)
+        kept = cap(kept, max_per_persona, rng)
+        dropped["over --max-per-persona"] = n - len(kept)
+    return kept, dropped
+
+
+def split(examples: list[Example], rng: random.Random) -> tuple[list[Example], list[Example]]:
+    """Shuffled into (train, val)."""
+    rng.shuffle(examples)
+    cut = max(1, int(len(examples) * VAL_FRACTION))
+    return examples[cut:], examples[:cut]
+
+
+# ------------------------------------------------------------------ writing
+
+def write(out: Path, splits: dict[str, list[Example]], voices: dict[str, list[str]],
+          profiles: dict[str, list[str]], rng: random.Random) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    for name, rows in splits.items():
+        with (out / f"{name}.jsonl").open("w", encoding="utf-8") as fh:
+            for e in rows:
+                own = own_lines(e.reply, voices.get(fold(e.persona), []), profiles.get(fold(e.persona), []), rng)
+                messages = build_messages(e.persona, e.lines, own)
+                messages.append({"role": "assistant", "content": e.reply})
+                fh.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
+    with (out / "voices.json").open("w", encoding="utf-8") as fh:
+        json.dump(voices, fh, ensure_ascii=False, indent=1)
+
+
+def report_losses(skipped: Counter[str], dropped: dict[str, int]) -> None:
+    for reason, n in skipped.most_common():
+        print(f"  skipped  {n} ({reason})")
+    for reason, n in dropped.items():
+        if n:
+            print(f"  dropped  {n} ({reason})")
+
+
+def report_personas(examples: list[Example], scrubber: Scrubber | None) -> None:
+    per_persona = Counter(e.persona for e in examples)
+    print("examples per persona:")
+    for name, n in per_persona.most_common():
+        print(f"  {n:>6}  {name}")
+    thin = [name for name, n in per_persona.items() if n < 500]
+    if thin:
+        print("\nunder ~500 examples is thin for a convincing persona:")
+        for name in thin:
+            print(f"  {name}")
+    if scrubber and scrubber.organizations:
+        print("\norganisations mentioned, kept as is; alias the ones that identify someone:")
+        for name, n in scrubber.organizations.most_common(20):
+            print(f"  {n:>6}  {name}")
+
+
 # -------------------------------------------------------------------- main
 
 def parser() -> argparse.ArgumentParser:
@@ -314,77 +391,25 @@ def run(args: argparse.Namespace) -> int:
         print("nothing survived loading", file=sys.stderr)
         return 1
 
-    by_id = {m.id: m for m in msgs}
-
-    by_channel: dict[str, list[Msg]] = {}
-    for m in msgs:
-        by_channel.setdefault(m.channel, []).append(m)
-
-    examples = []
-    for channel_msgs in by_channel.values():
-        channel_msgs.sort(key=lambda m: m.ts)
-        turns = merge_bursts(channel_msgs)
-        examples += build_examples(turns, personas, by_id)
-
+    examples = all_examples(msgs, personas)
     if not examples:
-        seen = Counter(m.author for m in msgs).most_common(15)
         print("no examples built. authors present:", file=sys.stderr)
-        for name, n in seen:
+        for name, n in Counter(m.author for m in msgs).most_common(15):
             print(f"  {name}  ({n})", file=sys.stderr)
         return 1
 
     rng = random.Random(args.seed)
-    built = len(examples)
-    examples = [e for e in examples if not has_link(e.reply)]
-    dropped = {"link": built - len(examples)}
     pattern = any_of(args.downweight)
-    if pattern:
-        n = len(examples)
-        examples = downweight(examples, pattern, rng)
-        dropped["downweighted"] = n - len(examples)
-    if args.max_per_persona:
-        n = len(examples)
-        examples = cap(examples, args.max_per_persona, rng)
-        dropped["over --max-per-persona"] = n - len(examples)
-
-    rng.shuffle(examples)
-    cut = max(1, int(len(examples) * VAL_FRACTION))
-    val, train = examples[:cut], examples[cut:]
+    examples, dropped = shape(examples, pattern, args.max_per_persona, rng)
+    train, val = split(examples, rng)
     # from train only, so no val reply shows up in a training context
     voices = voice_pool(train, pattern)
+    write(args.out, {"train": train, "val": val}, voices, profiles, rng)
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    for name, rows in (("train", train), ("val", val)):
-        with (args.out / f"{name}.jsonl").open("w", encoding="utf-8") as fh:
-            for e in rows:
-                own = own_lines(e.reply, voices.get(fold(e.persona), []),
-                                profiles.get(fold(e.persona), []), rng)
-                messages = build_messages(e.persona, e.lines, own)
-                messages.append({"role": "assistant", "content": e.reply})
-                fh.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
-    with (args.out / "voices.json").open("w", encoding="utf-8") as fh:
-        json.dump(voices, fh, ensure_ascii=False, indent=1)
-
-    per_persona = Counter(e.persona for e in examples)
     print(f"loaded     {len(msgs)} messages from {len(paths)} export(s)")
-    for reason, n in skipped.most_common():
-        print(f"  skipped  {n} ({reason})")
-    for reason, n in dropped.items():
-        if n:
-            print(f"  dropped  {n} ({reason})")
+    report_losses(skipped, dropped)
     print(f"wrote      {len(train)} train / {len(val)} val -> {args.out}")
-    print("examples per persona:")
-    for name, n in per_persona.most_common():
-        print(f"  {n:>6}  {name}")
-    thin = [name for name, n in per_persona.items() if n < 500]
-    if thin:
-        print("\nunder ~500 examples is thin for a convincing persona:")
-        for name in thin:
-            print(f"  {name}")
-    if scrubber and scrubber.organizations:
-        print("\norganisations mentioned, kept as is; alias the ones that identify someone:")
-        for name, n in scrubber.organizations.most_common(20):
-            print(f"  {n:>6}  {name}")
+    report_personas(examples, scrubber)
     return 0
 
 

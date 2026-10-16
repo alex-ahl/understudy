@@ -120,3 +120,7 @@ channel = []                # channel names to reply in; empty means all
 converse_every = 0          # minutes between conversations among the personas; 0 means none
 converse_length = 20        # messages per conversation
 # converse_channel = "general"  # where conversations happen; needed when converse_every is set
+temperature = 1.0           # sampling temperature; higher is more varied, and less coherent
+min_p = 0.05                # drop tokens less likely than this share of the likeliest
+xtc_probability = 0.5       # how often XTC cuts the likeliest tokens, steering off the obvious; 0 is off
+xtc_threshold = 0.1         # tokens at least this likely are the ones XTC can cut

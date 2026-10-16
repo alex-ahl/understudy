@@ -88,10 +88,11 @@ def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str], rn
     return [*rng.sample(pool, min(VOICE_EXAMPLES, len(pool))), *profile]
 
 
-def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
+def server_reply(url: str, messages: list[dict], sampling: dict[str, float], prefill: str = "") -> str:
     """Any OpenAI-compatible endpoint: llama-server, Ollama, LM Studio.
 
-    A prefill is the start of the reply, written for the model to continue."""
+    sampling holds the request's sampler fields, like temperature. A prefill is the start
+    of the reply, written for the model to continue."""
     if prefill:
         messages = [*messages, {"role": "assistant", "content": prefill}]
     # dry_* is llama-server's repeat-from-context penalty; without it a persona echoes its
@@ -100,10 +101,8 @@ def server_reply(url: str, messages: list[dict], prefill: str = "") -> str:
         {
             "model": "understudy",
             "messages": messages,
-            "temperature": 0.8,
-            "top_p": 0.95,
             "max_tokens": 200,
-            "repeat_penalty": 1.1,
+            **sampling,
             "dry_multiplier": 0.8,
             "dry_base": 1.75,
             "dry_allowed_length": 2,
@@ -181,6 +180,25 @@ def parser() -> argparse.ArgumentParser:
         metavar="REGEX",
         help=f"a matching reply is generated again, up to {REROLLS} times, then dropped",
     )
+    ap.add_argument("--temperature", type=float, default=1.0, help="sampling temperature (default 1.0)")
+    ap.add_argument(
+        "--min-p",
+        type=float,
+        default=0.05,
+        help="drop tokens less likely than this share of the likeliest (default 0.05)",
+    )
+    ap.add_argument(
+        "--xtc-probability",
+        type=float,
+        default=0.5,
+        help="how often XTC cuts the likeliest tokens; 0 turns it off (default 0.5)",
+    )
+    ap.add_argument(
+        "--xtc-threshold",
+        type=float,
+        default=0.1,
+        help="tokens at least this likely are the ones XTC can cut (default 0.1)",
+    )
     ap.set_defaults(people={})  # the config's [persona.*] and [aliases] tables
     return ap
 
@@ -199,6 +217,12 @@ class Bots:
         self.llm_url: str = args.llm_url
         self.channels = set(args.channel)
         self.avoid = any_of(args.downweight)
+        self.sampling: dict[str, float] = {
+            "temperature": args.temperature,
+            "min_p": args.min_p,
+            "xtc_probability": args.xtc_probability,
+            "xtc_threshold": args.xtc_threshold,
+        }
         self.converse_length: int = args.converse_length
         self.rng = rng or random.Random()
         self.clients: dict[str, Any] = {}
@@ -248,7 +272,7 @@ class Bots:
                 messages = build_messages(persona, turns[-CONTEXT_TURNS:], own)
                 speakers = {fold(p) for p in self.personas} | {fold(t.split(": ", 1)[0]) for t in turns}
                 for _ in range(1 + REROLLS):
-                    raw = await asyncio.to_thread(server_reply, self.llm_url, messages, prefill)
+                    raw = await asyncio.to_thread(server_reply, self.llm_url, messages, self.sampling, prefill)
                     # matched on the raw reply: cleanup removes some of what the patterns look for
                     if not (self.avoid and self.avoid.search(raw)):
                         break

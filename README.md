@@ -208,6 +208,9 @@ A persona replies to the channel's recent conversation when someone @-mentions
 it or writes its name. `channel` limits where. In compose the bots reach the
 model server as `http://llm:8080`; `llm_url` points them at another one.
 
+`temperature`, `min_p`, `xtc_probability` and `xtc_threshold` set how replies
+are sampled. Raising `temperature` or `xtc_probability` makes them more varied.
+
 ### Conversations among the personas
 
 ```toml

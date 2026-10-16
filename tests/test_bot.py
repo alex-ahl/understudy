@@ -1,8 +1,9 @@
-import argparse
+import io
+import json
 import random
 import unittest
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from understudy.bot import (
     Bots,
@@ -11,6 +12,8 @@ from understudy.bot import (
     named_personas,
     next_speaker,
     own_lines,
+    parser,
+    server_reply,
     with_prefill,
 )
 from understudy.chat import Msg
@@ -67,6 +70,21 @@ class Bot(unittest.TestCase):
         self.assertEqual(with_prefill("have you seen it", "@alice "), "@alice have you seen it")
         self.assertEqual(with_prefill("plain reply", ""), "plain reply")
 
+    def test_sampling_options_reach_the_request(self):
+        args = parser().parse_args(["--temperature", "1.2", "--min-p", "0.1"])
+        b = Bots(People([Persona("bob", token="t")], {}), {}, args)
+        resp = MagicMock()
+        resp.__enter__.return_value = io.BytesIO(b'{"choices": [{"message": {"content": "hi"}}]}')
+        with patch("understudy.bot.urllib.request.urlopen", return_value=resp) as urlopen:
+            self.assertEqual(server_reply("http://llm", [], b.sampling), "hi")
+        body = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(
+            {k: body[k] for k in b.sampling},
+            {"temperature": 1.2, "min_p": 0.1, "xtc_probability": 0.5, "xtc_threshold": 0.1},
+        )
+        self.assertNotIn("top_p", body)
+        self.assertNotIn("repeat_penalty", body)
+
     def test_reply_keeps_only_the_personas_own_clean_lines(self):
         raw = "bob: sure thing\ncheck [link example.com] out\nsure thing\nalice: no way"
         self.assertEqual(clean_reply(raw, "bob", {"bob", "alice"}), "sure thing\ncheck out")
@@ -79,7 +97,7 @@ class Channel:
 
 def bots(length=5, seed=0):
     people = People([Persona(p, token="t") for p in ("bob", "alice", "carol")], {})
-    args = argparse.Namespace(llm_url="", channel=[], downweight=[], converse_length=length)
+    args = parser().parse_args(["--llm-url", "", "--converse-length", str(length)])
     b = Bots(people, {}, args, random.Random(seed))
     b.clients = {p: Channel() for p in b.personas}
     return b

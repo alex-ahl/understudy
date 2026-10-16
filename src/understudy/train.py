@@ -35,11 +35,12 @@ def parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> int:
     # unsloth patches transformers/trl on import, so it has to come first
-    from unsloth import FastLanguageModel  # noqa: I001
-    from unsloth.chat_templates import train_on_responses_only
+    # only the GPU image has these
+    from unsloth import FastLanguageModel  # pyright: ignore[reportMissingImports]  # noqa: I001
+    from unsloth.chat_templates import train_on_responses_only  # pyright: ignore[reportMissingImports]
 
-    from datasets import load_dataset
-    from trl import SFTConfig, SFTTrainer
+    from datasets import load_dataset  # pyright: ignore[reportMissingImports]
+    from trl import SFTConfig, SFTTrainer  # pyright: ignore[reportMissingImports]
 
     model, tok = FastLanguageModel.from_pretrained(
         model_name=args.model,

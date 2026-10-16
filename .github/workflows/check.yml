@@ -1,0 +1,25 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # the same install as the Dockerfile's cpu stage
+      - run: >
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -c docker/constraints.txt
+          -e ".[dataset,bot]" protobuf
+          https://github.com/explosion/spacy-models/releases/download/sv_core_news_sm-3.8.0/sv_core_news_sm-3.8.0-py3-none-any.whl
+          ruff basedpyright
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: basedpyright
+      - run: python -m unittest discover -s tests

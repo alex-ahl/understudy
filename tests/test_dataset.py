@@ -5,16 +5,24 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from understudy.dataset import (VOICE_EXAMPLES, Example, any_of, cap, downweight, has_link, own_lines,
-                                voice_pool)
+from understudy.dataset import (
+    VOICE_EXAMPLES,
+    Example,
+    any_of,
+    cap,
+    downweight,
+    has_link,
+    own_lines,
+    voice_pool,
+)
 
 # run from a temp dir: the config is read from private/ under the working directory.
 # --no-scrub: scrubbing loads its models per run; test_scrub covers it
 DATASET = [sys.executable, "-m", "understudy", "dataset"]
-T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def msg(i, author, content, at, **extra):
@@ -40,7 +48,7 @@ def run(messages, *flags, config=None):
             {"channel": {"name": "general"}, "messages": messages}))
         proc = subprocess.run(
             [*DATASET, tmp / "export.json", "-o", tmp / "out", "--no-scrub", *flags],
-            capture_output=True, text=True, cwd=tmp)
+            capture_output=True, text=True, cwd=tmp, check=False)
         rows = []
         for name in ("train", "val"):
             path = tmp / "out" / f"{name}.jsonl"
@@ -185,7 +193,7 @@ class DiscordToSft(unittest.TestCase):
                 }))
             proc = subprocess.run(
                 [*DATASET, tmp, "--persona", "bob", "-o", tmp / "out", "--no-scrub"],
-                capture_output=True, text=True, cwd=tmp)
+                capture_output=True, text=True, cwd=tmp, check=False)
         self.assertRegex(proc.stdout, r"\n\s+2  bob\n")
 
     def test_link_replies_are_dropped(self):
@@ -205,7 +213,7 @@ class DiscordToSft(unittest.TestCase):
                 msg(3, "bob", "probably getting food again", 2 * M),
             ]}))
             subprocess.run([*DATASET, tmp / "export.json", "-o", tmp / "out", "--no-scrub",
-                            "--persona", "bob"], capture_output=True, cwd=tmp)
+                            "--persona", "bob"], capture_output=True, cwd=tmp, check=True)
             voices = json.loads((tmp / "out" / "voices.json").read_text())
         # the only example may land in val, which never feeds the pool
         self.assertIn(voices, ({"bob": ["probably getting food again"]}, {}))

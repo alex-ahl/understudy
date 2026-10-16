@@ -1,11 +1,18 @@
 import random
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from understudy.bot import clean_reply, conversation, named_personas, next_speaker, own_lines, with_prefill
+from understudy.bot import (
+    clean_reply,
+    conversation,
+    named_personas,
+    next_speaker,
+    own_lines,
+    with_prefill,
+)
 from understudy.dataset import Msg
 
-T0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def msg(author, content, minutes):

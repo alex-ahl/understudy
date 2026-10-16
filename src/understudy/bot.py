@@ -26,9 +26,19 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from understudy.dataset import (CONTEXT_TURNS, GAP_MINUTES, VOICE_EXAMPLES, Msg, any_of, clean, display_name,
-                                 merge_bursts, render)
-from understudy.people import fold, read as read_people
+from understudy.dataset import (
+    CONTEXT_TURNS,
+    GAP_MINUTES,
+    VOICE_EXAMPLES,
+    Msg,
+    any_of,
+    clean,
+    display_name,
+    merge_bursts,
+    render,
+)
+from understudy.people import fold
+from understudy.people import read as read_people
 from understudy.prompt import build_messages
 
 log = logging.getLogger("understudy")
@@ -281,7 +291,7 @@ def run(args: argparse.Namespace) -> int:
         # one bad token or missing intent shouldn't take the other personas down with it
         try:
             await client.start(tokens[persona])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"{persona} could not connect: {type(e).__name__}: {e}")
 
     async def start_all():

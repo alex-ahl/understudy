@@ -19,9 +19,13 @@ from collections import Counter
 
 from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
 from presidio_analyzer.nlp_engine import NlpEngineProvider
-from presidio_analyzer.predefined_recognizers import (EmailRecognizer, GLiNERRecognizer,
-                                                      PhoneRecognizer, SpacyRecognizer,
-                                                      UrlRecognizer)
+from presidio_analyzer.predefined_recognizers import (
+    EmailRecognizer,
+    GLiNERRecognizer,
+    PhoneRecognizer,
+    SpacyRecognizer,
+    UrlRecognizer,
+)
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
@@ -42,9 +46,9 @@ PLACEHOLDERS = {
 }
 
 RE_LINK = re.compile(r"^([(\['\"<]*)(?:https?://)?(?:www\.)?([^\s/?#<>'\"]+).*?([.,!?)\]'\">]*)$",
-                     re.I | re.S)
+                     re.IGNORECASE | re.DOTALL)
 # key=value forms the model misses; the key stays, so the sentence still reads
-RE_PASSWORD = re.compile(r"\b(password|passcode|lösenord|pwd)(\s*[:=]\s*)\S+", re.I)
+RE_PASSWORD = re.compile(r"\b(password|passcode|lösenord|pwd)(\s*[:=]\s*)\S+", re.IGNORECASE)
 RE_DIGIT = re.compile(r"\d")
 RE_POSTCODE = re.compile(r"[\s,]*\d{3}\s?\d{2}(?!\d)")
 RE_JOIN = re.compile(r"[\s,]*(?:\d{3}\s?\d{2}[\s,]*)?")

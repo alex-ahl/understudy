@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from understudy.people import fold, read as read_people, rename
+from understudy.people import fold, rename
+from understudy.people import read as read_people
 from understudy.prompt import build_messages
 
 if TYPE_CHECKING:
@@ -75,7 +76,7 @@ class Turn:
 # ------------------------------------------------------------------ loading
 
 def parse_ts(raw: str) -> datetime:
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    return datetime.fromisoformat(raw)
 
 
 def display_name(author: dict, aliases: dict[str, str]) -> str:

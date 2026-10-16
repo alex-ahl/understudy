@@ -78,7 +78,7 @@ class ConfigFile(unittest.TestCase):
                 '[persona.bob]\n[aliases]\nrobert = "pat"\n'
                 '[dataset]\ninput = "export.json"\nout = "data"\nno_scrub = true\n')
             proc = subprocess.run([sys.executable, "-m", "understudy", "dataset"],
-                                  capture_output=True, text=True, cwd=tmp)
+                                  capture_output=True, text=True, cwd=tmp, check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             rows = [json.loads(l) for name in ("train", "val") if (tmp / "data" / f"{name}.jsonl").exists()
                     for l in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()]
@@ -90,7 +90,7 @@ class ConfigFile(unittest.TestCase):
             path = Path(tmp) / "understudy.toml"
             path.write_text("[train]\nepoch = 3\n")
             proc = subprocess.run([sys.executable, "-m", "understudy", "--config", path, "dataset"],
-                                  capture_output=True, text=True, cwd=tmp)
+                                  capture_output=True, text=True, cwd=tmp, check=False)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("epoch", proc.stderr)
 

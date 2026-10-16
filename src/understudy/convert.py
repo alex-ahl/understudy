@@ -43,7 +43,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.adapter.is_dir():
         print(f"no adapter at {args.adapter}; run understudy train first", file=sys.stderr)
         return 1
-    return subprocess.run(command(args)).returncode
+    return subprocess.run(command(args), check=False).returncode
 
 
 def main(argv: list[str] | None = None) -> int:

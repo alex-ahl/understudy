@@ -35,7 +35,7 @@ def parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> int:
     # unsloth patches transformers/trl on import, so it has to come first
-    from unsloth import FastLanguageModel
+    from unsloth import FastLanguageModel  # noqa: I001
     from unsloth.chat_templates import train_on_responses_only
 
     from datasets import load_dataset

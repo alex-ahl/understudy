@@ -45,7 +45,13 @@ def options(parser: argparse.ArgumentParser) -> dict[str, argparse.Action]:
 
 def check(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> None:
     """Raises ConfigError on a section or key no command has, so a typo can't fall back to a default."""
-    for name, table in config.get("persona", {}).items():
+    check_personas(config.get("persona", {}))
+    check_aliases(config.get("aliases", {}))
+    check_options(config, parsers)
+
+
+def check_personas(personas: dict) -> None:
+    for name, table in personas.items():
         if not isinstance(table, dict):
             raise ConfigError(f"persona.{name} must be a table: [persona.{name}]")
         for key, value in table.items():
@@ -53,9 +59,15 @@ def check(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> None:
                 raise ConfigError(f"[persona.{name}] has no key {key}; keys are {', '.join(PERSONA_KEYS)}")
             if not isinstance(value, PERSONA_KEYS[key]):
                 raise ConfigError(f"[persona.{name}] {key} must be a {PERSONA_KEYS[key].__name__}")
-    for real, fake in config.get("aliases", {}).items():
+
+
+def check_aliases(aliases: dict) -> None:
+    for real, fake in aliases.items():
         if not isinstance(fake, str):
             raise ConfigError(f"[aliases] {real} must be a string")
+
+
+def check_options(config: dict, parsers: dict[str, argparse.ArgumentParser]) -> None:
     for key, value in config.items():
         if key in PEOPLE:
             continue

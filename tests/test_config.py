@@ -80,8 +80,8 @@ class ConfigFile(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-m", "understudy", "dataset"],
                                   capture_output=True, text=True, cwd=tmp, check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            rows = [json.loads(l) for name in ("train", "val") if (tmp / "data" / f"{name}.jsonl").exists()
-                    for l in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()]
+            rows = [json.loads(line) for name in ("train", "val") if (tmp / "data" / f"{name}.jsonl").exists()
+                    for line in (tmp / "data" / f"{name}.jsonl").read_text().splitlines()]
         [row] = rows
         self.assertIn("pat: something else", row["messages"][1]["content"])
 

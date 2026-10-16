@@ -105,9 +105,10 @@ def clean(content: str, mentions: list[dict], aliases: dict[str, str],
     return content.strip()
 
 
-def load(paths: list[Path], aliases: dict[str, str], scrubber: Scrubber | None):
+def load(paths: list[Path], aliases: dict[str, str],
+         scrubber: Scrubber | None) -> tuple[list[Msg], Counter[str]]:
     msgs: list[Msg] = []
-    skipped = Counter()
+    skipped: Counter[str] = Counter()
 
     for path in paths:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -196,7 +197,7 @@ def build_examples(turns: list[Turn], personas: set[str], by_id: dict[str, Msg])
 
         # an explicit reply to something that scrolled out of the window
         if turn.ids:
-            ref = by_id.get(turn.ids[0], None)
+            ref = by_id.get(turn.ids[0])
             ref_id = ref.reply_to if ref else None
             if ref_id and not any(ref_id in t.ids for t in ctx):
                 quoted = by_id.get(ref_id)
@@ -229,7 +230,7 @@ def downweight(examples: list[Example], pattern: re.Pattern, rng: random.Random)
         if pattern.search(e.reply) and rng.random() >= KEEP:
             continue
         *earlier, last = e.lines
-        earlier = [l for l in earlier if not pattern.search(l) or rng.random() < KEEP]
+        earlier = [line for line in earlier if not pattern.search(line) or rng.random() < KEEP]
         kept.append(Example(e.persona, [*earlier, last], e.reply))
     return kept
 
@@ -258,7 +259,7 @@ def own_lines(reply: str, pool: list[str], profile: list[str], rng: random.Rando
     """Up to VOICE_EXAMPLES voice lines, then some of the profile in order; sometimes nothing.
 
     Varied per example: text that is the same in every example teaches nothing."""
-    others = [l for l in pool if l != reply]
+    others = [line for line in pool if line != reply]
     voices = rng.sample(others, min(rng.randint(0, VOICE_EXAMPLES), len(others)))
     picked = sorted(rng.sample(range(len(profile)), rng.randint(0, len(profile))))
     return voices + [profile[i] for i in picked]

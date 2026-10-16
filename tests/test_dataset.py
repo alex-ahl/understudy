@@ -176,7 +176,7 @@ class DiscordToSft(unittest.TestCase):
         ], config='[persona.bob]\nprofile = ["Always hungry."]\n')
         [row] = rows
         self.assertEqual(row["messages"][0]["content"], "Reply as `bob`.")
-        own = [l for l in row["messages"][1]["content"].splitlines() if l.startswith("bob: ")]
+        own = [line for line in row["messages"][1]["content"].splitlines() if line.startswith("bob: ")]
         self.assertLessEqual(set(own), {"bob: Always hungry."})
 
     def test_persona_counts_sum_across_channels(self):
@@ -275,10 +275,10 @@ class Shaping(unittest.TestCase):
         seen_empty = False
         for seed in range(50):
             lines = own_lines("the reply itself", pool, profile, random.Random(seed))
-            voices = [l for l in lines if l not in profile]
+            voices = [line for line in lines if line not in profile]
             self.assertNotIn("the reply itself", lines)
             self.assertLessEqual(len(voices), VOICE_EXAMPLES)
-            self.assertEqual(lines[len(voices):], [l for l in profile if l in lines])
+            self.assertEqual(lines[len(voices):], [line for line in profile if line in lines])
             seen_empty |= not lines
         self.assertTrue(seen_empty)
 

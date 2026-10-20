@@ -50,7 +50,7 @@ HISTORY = 40  # raw messages; bursts and the gap cut bring it down to a conversa
 MAX_LINES = 5  # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
-REROLLS = 2  # extra tries for a reply that matches --downweight
+REROLLS = 10  # extra tries for a reply that matches --downweight
 PROFILE_OPENERS = 0.5  # share of conversations opened from a profile line instead of a real opener
 OPENER_WORDS = 3  # of a real opener, enough to set the topic and leave the rest to the model
 REPLY_TIMEOUT = 300  # seconds; a CPU server takes well under a minute per reply

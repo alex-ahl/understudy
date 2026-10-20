@@ -8,12 +8,13 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from understudy.chat import VOICE_EXAMPLES, any_of
+from understudy.chat import VOICE_EXAMPLES, Msg, any_of
 from understudy.dataset import (
     Example,
     cap,
     downweight,
     has_link,
+    opener_pool,
     own_lines,
     voice_pool,
 )
@@ -305,6 +306,21 @@ class DiscordToSft(unittest.TestCase):
             voices = json.loads((tmp / "out" / "voices.json").read_text())
         # the only example may land in val, which never feeds the pool
         self.assertIn(voices, ({"bob": ["probably getting food again"]}, {}))
+
+    def test_openers_start_a_conversation_someone_answers(self):
+        def m(author, content, at):
+            return Msg(str(at), T0 + at, author, content, "general", None, False)
+
+        msgs = [
+            m("bob", "anyone seen the new trains\nthey are fast", 0 * M),
+            m("alice", "yes, last week", 1 * M),
+            m("bob", "still thinking about those trains", 2 * M),
+            m("bob", "nobody ever answers this one", 60 * M),
+            m("bob", "talking to myself again here", 90 * M),
+            m("carol", "not a persona opening this", 120 * M),
+            m("bob", "so a persona answering it", 121 * M),
+        ]
+        self.assertEqual(opener_pool(msgs, {"bob"}, None), {"bob": ["anyone seen the new trains"]})
 
 
 class Always(random.Random):

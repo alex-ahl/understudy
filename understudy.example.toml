@@ -82,7 +82,7 @@ springfield = "[place]"
 
 [dataset]                   # understudy dataset: Discord export -> training data
 input = "private/exports"   # DiscordChatExporter JSON file, or a directory of them
-out = "private/data"        # writes train.jsonl, val.jsonl and voices.json
+out = "private/data"        # writes train.jsonl, val.jsonl, voices.json and openers.json
 persona = []                # extra personas by name, on top of [persona.*]
 alias = []                  # extra renames as "REAL=FAKE", on top of [aliases]
 max_per_persona = 1000      # example; default no cap. Samples larger personas down to
@@ -115,6 +115,7 @@ host = "0.0.0.0"            # address to listen on; compose publishes the port o
 
 [bot]                       # understudy bot: one Discord bot per persona with a token
 voices = "private/data/voices.json"   # written by understudy dataset
+openers = "private/data/openers.json" # written by understudy dataset
 # llm_url = "http://localhost:8080"   # any OpenAI-compatible server; compose sets it to its serve service
 channel = []                # channel names to reply in; empty means all
 converse_every = 0          # minutes between conversations among the personas; 0 means none

@@ -156,6 +156,10 @@ don't scrub.
   persona's `profile` lines, as that persona's messages a few turns from the
   end, the last profile line closest to the reply. The bots put three of them
   and the whole profile in the same place.
+- `private/data/openers.json` holds each persona's first lines of conversations
+  they started and someone answered. A persona opening a conversation among the
+  personas starts with the first words of one, or half the time of one of its
+  `profile` lines.
 
 ## 3. Train
 

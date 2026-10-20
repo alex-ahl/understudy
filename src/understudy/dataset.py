@@ -3,7 +3,8 @@
     understudy dataset private/exports/ --persona bob --persona alice -o private/data/
 
 Reads DCE JSON, merges message bursts, splits on conversation gaps, windows
-context, and writes train.jsonl / val.jsonl in the chat-messages format.
+context, and writes train.jsonl / val.jsonl in the chat-messages format, plus
+voices.json and openers.json for the bots.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -147,17 +149,42 @@ def build_examples(turns: list[Turn], personas: set[str], by_id: dict[str, Msg])
     return examples
 
 
-def all_examples(msgs: list[Msg], personas: set[str]) -> list[Example]:
-    """Examples from every channel, each read in order on its own."""
-    by_id = {m.id: m for m in msgs}
+def channel_turns(msgs: list[Msg]) -> list[list[Turn]]:
+    """Each channel's messages in order, merged into turns."""
     by_channel: dict[str, list[Msg]] = {}
     for m in msgs:
         by_channel.setdefault(m.channel, []).append(m)
-    examples = []
-    for channel_msgs in by_channel.values():
-        channel_msgs.sort(key=lambda m: m.ts)
-        examples += build_examples(merge_bursts(channel_msgs), personas, by_id)
-    return examples
+    return [merge_bursts(sorted(channel_msgs, key=lambda m: m.ts)) for channel_msgs in by_channel.values()]
+
+
+def all_examples(msgs: list[Msg], personas: set[str]) -> list[Example]:
+    """Examples from every channel, each read in order on its own."""
+    by_id = {m.id: m for m in msgs}
+    return [e for turns in channel_turns(msgs) for e in build_examples(turns, personas, by_id)]
+
+
+def opener_pool(msgs: list[Msg], personas: set[str], pattern: re.Pattern | None) -> dict[str, list[str]]:
+    """Per persona (folded), first lines of the conversations they started and someone answered."""
+    pool: dict[str, list[str]] = {}
+    gap = timedelta(minutes=GAP_MINUTES)
+    for turns in channel_turns(msgs):
+        for i, (turn, answer) in enumerate(pairwise(turns)):
+            if (
+                fold(turn.author) not in personas
+                or (i and turn.ts - turns[i - 1].ts <= gap)
+                or answer.author == turn.author
+                or answer.ts - turn.ts > gap
+            ):
+                continue
+            line = turn.content.split("\n")[0]
+            if (
+                len(line) >= MIN_TARGET_CHARS
+                and "[" not in line
+                and not has_link(line)
+                and not (pattern and pattern.search(line))
+            ):
+                pool.setdefault(fold(turn.author), []).append(line)
+    return pool
 
 
 # ----------------------------------------------------------------- shaping
@@ -248,6 +275,7 @@ def write(
     out: Path,
     splits: dict[str, list[Example]],
     voices: dict[str, list[str]],
+    openers: dict[str, list[str]],
     profiles: dict[str, list[str]],
     rng: random.Random,
 ) -> None:
@@ -259,8 +287,9 @@ def write(
                 messages = build_messages(e.persona, e.lines, own)
                 messages.append({"role": "assistant", "content": e.reply})
                 fh.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
-    with (out / "voices.json").open("w", encoding="utf-8") as fh:
-        json.dump(voices, fh, ensure_ascii=False, indent=1)
+    for name, pool in {"voices": voices, "openers": openers}.items():
+        with (out / f"{name}.json").open("w", encoding="utf-8") as fh:
+            json.dump(pool, fh, ensure_ascii=False, indent=1)
 
 
 def report_losses(skipped: Counter[str], dropped: dict[str, int]) -> None:
@@ -374,7 +403,8 @@ def run(args: argparse.Namespace) -> int:
     train, val = split(examples, rng)
     # from train only, so no val reply shows up in a training context
     voices = voice_pool(train, pattern)
-    write(args.out, {"train": train, "val": val}, voices, profiles, rng)
+    openers = opener_pool(msgs, personas, pattern)
+    write(args.out, {"train": train, "val": val}, voices, openers, profiles, rng)
 
     print(f"loaded     {len(msgs)} messages from {len(paths)} export(s)")
     report_losses(skipped, dropped)

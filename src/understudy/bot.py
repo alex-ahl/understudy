@@ -3,12 +3,12 @@
     understudy bot
 
 Each persona with a `token` in its [persona.NAME] table is its own bot account.
-The voice lines come from private/data/voices.json, written by understudy
-dataset. A persona replies to the channel's recent conversation when someone
-@-mentions it or writes its name in a message. With --converse-every or
---converse-at, the personas also talk among themselves in --converse-channel:
-one opens by turning to another, whoever is named answers next, and a person
-writing stops them.
+The voice lines and conversation openers come from private/data/voices.json and
+openers.json, written by understudy dataset. A persona replies to the channel's
+recent conversation when someone @-mentions it or writes its name in a message.
+With --converse-every or --converse-at, the personas also talk among themselves
+in --converse-channel: one opens by turning to another, whoever is named answers
+next, and a person writing stops them.
 
 --llm-url and --channel default to the LLM_URL and CHANNELS (comma-separated)
 environment variables.
@@ -51,6 +51,8 @@ MAX_LINES = 5  # real bursts rarely run longer; loops always do
 
 RE_PLACEHOLDER = re.compile(r"\[(?:link [^\]]*|[a-z]+)\]")
 REROLLS = 2  # extra tries for a reply that matches --downweight
+PROFILE_OPENERS = 0.5  # share of conversations opened from a profile line instead of a real opener
+OPENER_WORDS = 3  # of a real opener, enough to set the topic and leave the rest to the model
 REPLY_TIMEOUT = 300  # seconds; a CPU server takes well under a minute per reply
 
 
@@ -86,6 +88,12 @@ def next_speaker(reply: str, current: str, personas: list[str], rng: random.Rand
 def seconds_until(now: datetime, times: list[time]) -> float:
     """Until the next of the daily UTC times; one already past today comes round tomorrow."""
     return min((datetime.combine(now.date(), t, UTC) - now).total_seconds() % 86400 for t in times)
+
+
+def opener(target: str, line: str) -> str:
+    """A prefill addressing target, then the first words of a real conversation opener."""
+    words = [w for w in line.split() if not w.startswith("@")][:OPENER_WORDS]
+    return " ".join([f"@{target}", *words]) + " "
 
 
 def own_lines(persona: str, voices: dict[str, list[str]], profile: list[str], rng: random.Random) -> list[str]:
@@ -158,6 +166,7 @@ def parser() -> argparse.ArgumentParser:
         prog="understudy bot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--voices", type=Path, default=Path("private/data/voices.json"), metavar="FILE")
+    ap.add_argument("--openers", type=Path, default=Path("private/data/openers.json"), metavar="FILE")
     ap.add_argument(
         "--llm-url",
         default=os.environ.get("LLM_URL", "http://localhost:8080"),
@@ -220,7 +229,12 @@ class Bots:
     """One Discord client per persona, sharing what they have seen."""
 
     def __init__(
-        self, people: People, voices: dict[str, list[str]], args: argparse.Namespace, rng: random.Random | None = None
+        self,
+        people: People,
+        voices: dict[str, list[str]],
+        args: argparse.Namespace,
+        rng: random.Random | None = None,
+        openers: dict[str, list[str]] | None = None,
     ) -> None:
         self.aliases = people.aliases
         self.tokens = {p.name: p.token for p in people.personas if p.token}
@@ -230,6 +244,10 @@ class Bots:
         self.llm_url: str = args.llm_url
         self.channels = set(args.channel)
         self.avoid = any_of(args.downweight)
+        # filtered here too, so a new pattern applies without rebuilding the dataset
+        self.openers = {
+            k: [line for line in v if not (self.avoid and self.avoid.search(line))] for k, v in (openers or {}).items()
+        }
         self.sampling: dict[str, float] = {
             "temperature": args.temperature,
             "min_p": args.min_p,
@@ -303,8 +321,12 @@ class Bots:
     async def converse(self, channel_id: int) -> None:
         started = datetime.now(UTC)
         persona = self.rng.choice(self.personas)
-        # opens by turning to someone, so it starts its own thread instead of carrying on the last one
-        prefill = f"@{next_speaker('', persona, self.personas, self.rng)} "
+        # opens by turning to someone with the start of a real opener, so it starts a topic of its own
+        # instead of answering a question nobody asked; or of a profile line, which training never
+        # rewarded bringing up, so it rarely comes up unprompted
+        lines, profile = self.openers.get(fold(persona)), self.profiles[persona]
+        pool = profile if profile and (not lines or self.rng.random() < PROFILE_OPENERS) else lines
+        prefill = opener(next_speaker("", persona, self.personas, self.rng), self.rng.choice(pool) if pool else "")
         for _ in range(self.converse_length):
             if self.last_person.get(channel_id, started) > started:
                 log.info("conversation stops: a person wrote")
@@ -397,8 +419,10 @@ def run(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
-    voices = json.loads(args.voices.read_text(encoding="utf-8")) if args.voices.exists() else {}
-    bots = Bots(people, voices, args)
+    voices, openers = (
+        json.loads(path.read_text(encoding="utf-8")) if path.exists() else {} for path in (args.voices, args.openers)
+    )
+    bots = Bots(people, voices, args, openers=openers)
     if not bots.personas:
         print('no persona has a token: add token = "..." to its [persona.NAME] table', file=sys.stderr)
         return 1

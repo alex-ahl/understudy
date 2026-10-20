@@ -11,6 +11,7 @@ from understudy.bot import (
     conversation,
     named_personas,
     next_speaker,
+    opener,
     own_lines,
     parser,
     seconds_until,
@@ -56,6 +57,15 @@ class Bot(unittest.TestCase):
         times = [time(17), time(11)]
         self.assertEqual(seconds_until(T0, times), 5 * 3600)
         self.assertEqual(seconds_until(T0.replace(hour=17, second=1), times), 18 * 3600 - 1)
+
+    def test_opener_addresses_someone_with_the_start_of_a_real_opener(self):
+        self.assertEqual(opener("alice", "@carol har ni sett nya tåget?"), "@alice har ni sett ")
+        self.assertEqual(opener("alice", ""), "@alice ")
+
+    def test_openers_matching_downweight_are_dropped(self):
+        args = parser().parse_args(["--downweight", "trains"])
+        b = Bots(People([], {}), {}, args, openers={"bob": ["anyone seen the trains", "new album out"]})
+        self.assertEqual(b.openers, {"bob": ["new album out"]})
 
     def test_own_lines_are_voice_lines_then_the_whole_profile(self):
         voices = {"bob": ["one", "two", "three", "four"]}
@@ -125,6 +135,13 @@ class Conversation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p for p, _ in spoken], ["bob", "alice", "carol"])
         self.assertTrue(spoken[0][1].startswith("@"))
         self.assertEqual([prefill for _, prefill in spoken[1:]], ["", ""])
+
+    async def test_it_opens_from_a_profile_line_when_there_are_no_openers(self):
+        b = bots()
+        b.profiles = {p: ["Loves night trains to Berlin."] for p in b.personas}
+        with patch.object(b, "speak", new=AsyncMock(return_value="")) as speak:
+            await b.converse(1)
+        self.assertTrue(speak.await_args_list[0].args[2].endswith(" Loves night trains "))
 
     async def test_a_person_writing_stops_it(self):
         b = bots()
